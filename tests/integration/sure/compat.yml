@@ -1,0 +1,8 @@
+# The same production compatibility adapter is loaded in both Sure processes.
+services:
+  web:
+    volumes:
+      - ../../../integrations/sure/degitide_simplefin.rb:/rails/config/initializers/degitide_simplefin.rb:ro
+  worker:
+    volumes:
+      - ../../../integrations/sure/degitide_simplefin.rb:/rails/config/initializers/degitide_simplefin.rb:ro

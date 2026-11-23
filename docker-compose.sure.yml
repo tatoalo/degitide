@@ -1,0 +1,13 @@
+# Create first: docker network create --internal degitide-sure
+# Attach Sure's web AND background-worker services to the same external network.
+services:
+  app:
+    environment:
+      DEGITIDE_ALLOWED_HOSTS: "${DEGITIDE_ALLOWED_HOSTS:-127.0.0.1,localhost,[::1]},degitide-sure"
+    networks:
+      sure:
+        aliases: [degitide-sure]
+networks:
+  sure:
+    external: true
+    name: degitide-sure

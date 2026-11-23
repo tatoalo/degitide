@@ -1,0 +1,216 @@
+services:
+  bootstrap:
+    image: "${DEGITIDE_BOOTSTRAP_IMAGE:-degitide-bootstrap}"
+    build:
+      context: .
+      target: bootstrap-runtime
+    network_mode: none
+    restart: "no"
+    volumes:
+      - degitide-vault-key:/vault-key
+      - degitide-data:/data
+      - degitide-browser-profile:/browser-profile
+      - degitide-proxy-private:/var/lib/degitide-proxy
+      - degitide-proxy-ca:/proxy-ca
+      - degitide-runtime-secrets:/run/degitide-secrets
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    cap_add:
+      - CHOWN
+      - FOWNER
+
+  egress-proxy:
+    image: "${DEGITIDE_EGRESS_PROXY_IMAGE:-degitide-egress-proxy}"
+    build:
+      context: .
+      target: proxy-runtime
+    restart: unless-stopped
+    environment:
+      DEGITIDE_PROXY_LOGIN_MODE: "false"
+      DEGITIDE_PROXY_LOGIN_TOKEN_FILE: "/run/degitide-secrets/proxy-login-token"
+    volumes:
+      - degitide-proxy-private:/var/lib/degitide-proxy
+      - degitide-proxy-ca:/proxy-ca
+      - degitide-runtime-secrets:/run/degitide-secrets:ro
+    networks:
+      - worker-egress
+      - egress
+    depends_on:
+      bootstrap:
+        condition: service_completed_successfully
+    read_only: true
+    tmpfs:
+      - /tmp:mode=700,uid=10002,gid=10002
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    healthcheck:
+      test: ["CMD", "python", "-c", "import socket; socket.create_connection(('127.0.0.1', 8080), 2).close()"]
+      interval: 30s
+      start_interval: 2s
+      timeout: 3s
+      retries: 3
+      start_period: 10s
+
+  worker:
+    image: "${DEGITIDE_WORKER_IMAGE:-degitide-worker}"
+    build:
+      context: .
+      target: worker-runtime
+    restart: unless-stopped
+    environment:
+      DEGITIDE_VAULT_KEY_FILE: "/vault-key/key"
+      DEGITIDE_WORKER_BIND: "0.0.0.0"
+      DEGITIDE_WORKER_PORT: "9377"
+      DEGITIDE_WORKER_TOKEN_FILE: "/run/degitide-secrets/worker-token"
+      DEGITIDE_BROWSER_PROFILE: "/browser-profile"
+      DEGITIDE_PROXY: "http://egress-proxy:8080"
+      DEGITIDE_PROXY_CA_CERT: "/proxy-ca/mitmproxy-ca-cert.pem"
+      DEGITIDE_PROXY_LOGIN_TOKEN_FILE: "/run/degitide-secrets/proxy-login-token"
+      NODE_EXTRA_CA_CERTS: "/proxy-ca/mitmproxy-ca-cert.pem"
+      DEGITIDE_BROWSER_IDLE_SECONDS: "${DEGITIDE_BROWSER_IDLE_SECONDS:-300}"
+    volumes:
+      - degitide-vault-key:/vault-key:ro
+      - degitide-browser-profile:/browser-profile
+      - degitide-proxy-ca:/proxy-ca:ro
+      - degitide-runtime-secrets:/run/degitide-secrets:ro
+    networks:
+      - app-worker
+      - worker-egress
+    depends_on:
+      bootstrap:
+        condition: service_completed_successfully
+      egress-proxy:
+        condition: service_healthy
+    read_only: true
+    tmpfs:
+      - /tmp:mode=700,uid=10001,gid=10001
+      - /home/degitide-worker:mode=700,uid=10001,gid=10001
+    shm_size: "1gb"
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    healthcheck:
+      test: ["CMD", "python", "-c", "import json, urllib.request; json.load(urllib.request.urlopen('http://127.0.0.1:9377/health', timeout=2))"]
+      interval: 30s
+      start_interval: 2s
+      timeout: 3s
+      retries: 3
+      start_period: 10s
+
+  app:
+    image: "${DEGITIDE_APP_IMAGE:-degitide-app}"
+    build:
+      context: .
+      target: app-runtime
+    restart: unless-stopped
+    environment:
+      DEGITIDE_BIND: "0.0.0.0"
+      DEGITIDE_PORT: "8391"
+      DEGITIDE_WORKER_URL: "http://worker:9377"
+      DEGITIDE_WORKER_TOKEN_FILE: "/run/degitide-secrets/worker-token"
+      DEGITIDE_API_TOKEN_FILE: "/run/degitide-secrets/dashboard-token"
+      DEGITIDE_ALLOWED_HOSTS: "${DEGITIDE_ALLOWED_HOSTS:-127.0.0.1,localhost,[::1]}"
+      DEGITIDE_DB: "/data/degitide.db"
+      DEGITIDE_SCHEDULE: "${DEGITIDE_SCHEDULE:-market}"
+      DEGITIDE_SYNC_INTERVAL_MINUTES: "${DEGITIDE_SYNC_INTERVAL_MINUTES:-60}"
+      DEGITIDE_MAINTENANCE_SCHEDULE: "${DEGITIDE_MAINTENANCE_SCHEDULE:-CRON_TZ=Europe/Dublin 0 2 * * *}"
+      DEGITIDE_NOTIFY_URL: "${DEGITIDE_NOTIFY_URL:-}"
+      DEGITIDE_NOTIFY_TOKEN_FILE: "/run/degitide-secrets/notify-token"
+    volumes:
+      - degitide-data:/data
+      - degitide-runtime-secrets:/run/degitide-secrets:ro
+    networks:
+      - app-worker
+      - dashboard-ingress
+      - app-notifier
+    depends_on:
+      bootstrap:
+        condition: service_completed_successfully
+      worker:
+        condition: service_healthy
+    read_only: true
+    tmpfs:
+      - /tmp:mode=700,uid=10000,gid=10000
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+
+  notifier:
+    image: "${DEGITIDE_APP_IMAGE:-degitide-app}"
+    build:
+      context: .
+      target: app-runtime
+    profiles: ["notifications"]
+    command: ["notify-serve"]
+    user: "10004:10997"
+    restart: unless-stopped
+    environment:
+      DEGITIDE_NOTIFY_TOKEN_FILE: "/run/degitide-secrets/notify-token"
+      DEGITIDE_NOTIFY_PROVIDER: "${DEGITIDE_NOTIFY_PROVIDER:-}"
+      DEGITIDE_TELEGRAM_TOKEN: "${DEGITIDE_TELEGRAM_TOKEN:-}"
+      DEGITIDE_TELEGRAM_CHAT_ID: "${DEGITIDE_TELEGRAM_CHAT_ID:-}"
+      DEGITIDE_PUSHOVER_TOKEN: "${DEGITIDE_PUSHOVER_TOKEN:-}"
+      DEGITIDE_PUSHOVER_USER: "${DEGITIDE_PUSHOVER_USER:-}"
+    volumes:
+      - degitide-runtime-secrets:/run/degitide-secrets:ro
+    networks:
+      - app-notifier
+      - notification-egress
+    depends_on:
+      bootstrap:
+        condition: service_completed_successfully
+    read_only: true
+    tmpfs:
+      - /tmp:mode=700,uid=10004,gid=10997
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+
+  dashboard-gateway:
+    image: "${DEGITIDE_DASHBOARD_GATEWAY_IMAGE:-degitide-dashboard-gateway}"
+    build:
+      context: .
+      target: gateway-runtime
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:8391:8391"
+    networks:
+      - dashboard-ingress
+      - access
+    depends_on:
+      - app
+    read_only: true
+    tmpfs:
+      - /tmp:mode=700,uid=10003,gid=10003
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+
+networks:
+  app-worker:
+    internal: true
+  worker-egress:
+    internal: true
+  dashboard-ingress:
+    internal: true
+  app-notifier:
+    internal: true
+  notification-egress: {}
+  egress: {}
+  access: {}
+
+volumes:
+  degitide-vault-key:
+  degitide-data:
+  degitide-browser-profile:
+  degitide-proxy-private:
+  degitide-proxy-ca:
+  degitide-runtime-secrets:

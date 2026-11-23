@@ -1,0 +1,15 @@
+.git
+.venv
+bin
+dist
+browser-profile
+data
+CREDENTIALS.md
+**/__pycache__
+**/*.pyc
+PROGRESS.md
+
+.env
+.env.*
+design
+docs/releases

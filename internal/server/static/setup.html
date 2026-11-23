@@ -1,0 +1,120 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>Create your workspace · degitide</title>
+    <link rel="icon" href="/brand.svg" type="image/svg+xml" />
+    <link rel="stylesheet" href="/auth.css" />
+    <script src="/auth.js" defer></script>
+  </head>
+  <body data-page="setup" data-error="__DEGITIDE_ERROR_CODE__">
+    <header class="auth-header">
+      <a class="brand" href="/" aria-label="Degitide home"
+        ><img src="/brand.svg" alt="" />degitide</a
+      >
+      <span class="auth-caption">Portfolio workspace</span>
+    </header>
+    <main class="auth-shell">
+      <section class="auth-form" aria-labelledby="auth-title">
+        <div class="auth-steps" aria-label="Workspace setup">
+          <b>01 / Create workspace</b><span>02 / Connect accounts</span>
+        </div>
+        <h1 id="auth-title">Create your workspace</h1>
+        <p class="auth-copy">
+          Set up your Degitide administrator account. Connect your DEGIRO
+          accounts next.
+        </p>
+        <form action="/setup" method="post">
+          <input
+            name="csrf_token"
+            type="hidden"
+            value="__DEGITIDE_CSRF_TOKEN__"
+          />
+          <div class="field">
+            <label for="username">Username</label
+            ><input
+              class="input"
+              id="username"
+              name="username"
+              type="text"
+              value="__DEGITIDE_USERNAME__"
+              minlength="3"
+              maxlength="64"
+              autocomplete="username"
+              autocapitalize="none"
+              spellcheck="false"
+              required
+              autofocus
+            />
+            <p class="hint">3–64 characters: letters, numbers, or . _ @ + −</p>
+          </div>
+          <div class="field">
+            <label for="password">Password</label>
+            <div class="input-wrap">
+              <input
+                class="input"
+                id="password"
+                name="password"
+                type="password"
+                minlength="12"
+                maxlength="256"
+                autocomplete="new-password"
+                required
+              /><button
+                class="reveal"
+                type="button"
+                data-reveal="password"
+                aria-label="Show password"
+              >
+                <svg class="icon" viewBox="0 0 24 24" aria-hidden="true">
+                  <path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12Z" />
+                  <circle cx="12" cy="12" r="3" />
+                </svg>
+              </button>
+            </div>
+            <p class="hint">
+              At least 12 characters. Password managers welcome.
+            </p>
+          </div>
+          <div class="field">
+            <label for="password_confirm">Confirm password</label>
+            <div class="input-wrap">
+              <input
+                class="input"
+                id="password_confirm"
+                name="password_confirm"
+                type="password"
+                minlength="12"
+                maxlength="256"
+                autocomplete="new-password"
+                required
+              /><button
+                class="reveal"
+                type="button"
+                data-reveal="password_confirm"
+                aria-label="Show confirmation password"
+              >
+                <svg class="icon" viewBox="0 0 24 24" aria-hidden="true">
+                  <path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12Z" />
+                  <circle cx="12" cy="12" r="3" />
+                </svg>
+              </button>
+            </div>
+          </div>
+          <p class="error" id="error" role="alert"></p>
+          <button class="button primary submit" type="submit">
+            Create workspace <span aria-hidden="true">→</span>
+          </button>
+        </form>
+        <p class="setup-note">
+          The first account becomes the administrator. Complete this step before
+          sharing the address.
+        </p>
+      </section>
+      <p class="auth-foot">
+        Your Degitide login is separate from your DEGIRO accounts.
+      </p>
+    </main>
+  </body>
+</html>

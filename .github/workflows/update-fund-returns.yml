@@ -1,0 +1,65 @@
+name: Update fund returns
+
+# Weekly refresh of the dashboard's "Historical context" figures from issuer
+# factsheets and ECB reference rates. Factsheets change monthly, so most runs
+# find nothing new and exit without committing. The server itself never
+# fetches these: the data ships inside the image.
+on:
+  schedule:
+    - cron: "23 5 * * 1" # Mondays 05:23 UTC
+  workflow_dispatch:
+
+permissions:
+  contents: write # commit internal/server/static/fund-returns.js
+  actions: write # dispatch "Publish images"
+
+concurrency:
+  group: update-fund-returns
+  cancel-in-progress: false
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Set up Python
+        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: "3.12"
+
+      - name: Set up Node
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: "22"
+
+      - name: Install pdftotext
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq poppler-utils
+
+      - name: Regenerate references
+        run: python scripts/update-fund-returns.py
+
+      - name: Test
+        run: |
+          python -m unittest discover -s scripts/tests -v
+          node --test scripts/tests/portfolio.test.cjs
+
+      - name: Commit and publish images
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          file=internal/server/static/fund-returns.js
+          if git diff --quiet -- "$file"; then
+            echo "No new factsheet data."
+            exit 0
+          fi
+          as_of=$(node -e 'console.log([...new Set(require("./'"$file"'").fundReturnReferences.map(r => r.asOf))].join(", "))')
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add "$file"
+          git commit -m "Update fund return references (as of $as_of)"
+          git push origin HEAD:main
+          # Pushes made with GITHUB_TOKEN do not trigger push workflows, but a
+          # dispatch does, so rebuild the images explicitly.
+          gh workflow run publish-images.yml --ref main
