@@ -1,0 +1,851 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>degitide · your portfolio</title>
+    <link rel="icon" href="/brand.svg" type="image/svg+xml" />
+    <link rel="stylesheet" href="/base.css" />
+    <link rel="stylesheet" href="/dashboard.css" />
+    <link rel="stylesheet" href="/observatory.css" />
+    <script src="/fund-returns.js" defer></script>
+    <script src="/portfolio.js" defer></script>
+    <script src="/dashboard.js" defer></script>
+  </head>
+  <body data-current-view="overview">
+    <header class="app-header">
+      <a class="brand" href="/"><img src="/brand.svg" alt="" />degitide</a>
+      <nav aria-label="Workspace" id="appNav">
+        <button data-view="overview" aria-current="page">Overview</button
+        ><button data-view="holdings">Holdings</button
+        ><button data-view="transactions">Transactions</button
+        ><button data-view="simulator">Simulator</button
+        ><button data-view="accounts">Accounts</button>
+      </nav>
+      <form action="/logout" method="post">
+        <button class="text-button" type="submit">Sign out</button>
+      </form>
+    </header>
+    <main class="workspace">
+      <div class="workspace-toolbar">
+        <label class="account-select"
+          ><span class="eyebrow">Account</span
+          ><select id="accountSelect" aria-label="Broker account">
+            <option value="default">Main account</option>
+          </select></label
+        >
+        <div class="toolbar-actions">
+          <button class="text-button" id="syncAllButton">
+            Sync all accounts</button
+          ><button class="button primary" id="pullButton">
+            ↻ Sync account
+          </button>
+        </div>
+      </div>
+      <section
+        class="sync-progress"
+        id="syncProgress"
+        aria-label="Sync progress"
+        hidden
+      >
+        <div class="progress-head">
+          <p id="progressLabel" role="status" aria-live="polite">
+            Starting sync
+          </p>
+          <span id="progressValue" class="mono">0%</span>
+        </div>
+        <progress
+          id="progressBar"
+          max="100"
+          value="0"
+          aria-label="Completed sync stages"
+        ></progress>
+        <div id="progressAccounts" class="progress-accounts"></div>
+        <p class="small muted">
+          Progress follows completed stages. You can close this page while the
+          server works.
+        </p>
+      </section>
+      <div
+        id="notice"
+        class="notice"
+        role="status"
+        aria-live="polite"
+        hidden
+      ></div>
+      <div class="page-title">
+        <div>
+          <p class="eyebrow" id="accountName">Your portfolio</p>
+          <h1 id="pageTitle">Portfolio overview</h1>
+          <p id="pageDescription">What you own, in one place.</p>
+        </div>
+        <span id="connectionStatus" class="pill neutral">Loading account…</span>
+      </div>
+      <section
+        class="broker-strip"
+        data-pages="overview"
+        aria-label="Broker account totals"
+      >
+        <dl
+          id="brokerSummary"
+          class="performance-summary broker-summary"
+          hidden
+        >
+          <div data-metric="portfolio">
+            <dt>DEGIRO portfolio</dt>
+            <dd id="brokerPortfolio">—</dd>
+            <dd class="metric-context">Securities + adjustments</dd>
+          </div>
+          <div data-metric="cash">
+            <dt>Cash</dt>
+            <dd id="brokerCash">—</dd>
+            <dd class="metric-context">Broker cash balance</dd>
+          </div>
+          <div data-metric="balance">
+            <dt>Account balance</dt>
+            <dd id="brokerBalance">—</dd>
+            <dd class="metric-context">Portfolio + cash</dd>
+          </div>
+          <div data-metric="total-pl">
+            <dt>DEGIRO total P&amp;L</dt>
+            <dd><span id="brokerPL">—</span><span class="broker-direction" aria-hidden="true"></span></dd>
+            <dd class="metric-context">All time · broker reported</dd>
+          </div>
+          <div data-metric="day-pl">
+            <dt id="brokerDayLabel">Day P&amp;L</dt>
+            <dd><span id="brokerDayPL">—</span><span class="broker-direction" aria-hidden="true"></span></dd>
+            <dd class="metric-context" id="brokerDayContext">At the saved sync</dd>
+          </div>
+        </dl>
+        <p id="brokerReconciliation" class="small muted" hidden></p>
+      </section>
+      <section id="marketSchedule" class="market-schedule" data-pages="overview" aria-label="Automatic sync schedule" hidden>
+        <div><span id="marketState" class="market-state"></span><span id="marketVenues"></span></div>
+        <div class="market-next"><span id="nextSync"></span><small id="nextSyncReason"></small></div>
+        <p id="marketCadence"></p>
+        <div id="scheduleWindow" class="schedule-window" hidden>
+          <span class="muted">Upcoming runs</span><ol id="scheduleRuns"></ol>
+          <code id="scheduleExpression"></code>
+        </div>
+        <p id="marketFallback"></p>
+        <div class="schedule-tools">
+          <details class="schedule-explainer">
+            <summary>How scheduling works</summary>
+            <ol>
+              <li>We identify each stock or ETF’s listing exchange from DEGIRO. The fund’s underlying countries do not set its trading hours.</li>
+              <li>Each account refreshes while any known held market is open, with a final refresh after close. Calendars include holidays, early closes, lunch breaks and daylight saving.</li>
+              <li>The daily safety check refreshes snapshots at least 10 hours old. It also covers unknown markets. An evening closing sync can cover the next overnight Sure import.</li>
+              <li>On restart, only overdue accounts catch up. Failed market syncs retry after 15, 30, 60, 120 and then 240 minutes; that backoff survives restarts.</li>
+            </ol>
+            <p>These rules apply in market-hours mode. Custom cron follows its own schedule. More frequent collection does not make delayed broker quotes live.</p>
+          </details>
+          <button class="button" id="scheduleSettingsButton" type="button">Sync settings ↗</button>
+        </div>
+      </section>
+      <div class="overview-grid">
+        <section class="history-panel" data-pages="overview">
+          <div class="section-heading">
+            <p class="eyebrow">Recorded holdings value</p>
+            <label class="currency-picker"
+              >Currency<select
+                id="chartCurrency"
+                aria-label="Holdings currency"
+              ></select
+            ></label>
+          </div>
+          <div class="portfolio-value" id="portfolioValue">—</div>
+          <p id="portfolioContext" class="small muted"></p>
+          <details class="valuation-details"><summary id="valuationSummary"></summary><p id="valuationNote" class="small muted"></p></details>
+          <dl id="performanceSummary" class="performance-summary" hidden>
+            <div>
+              <dt>Net invested</dt>
+              <dd id="netInvested">—</dd>
+            </div>
+            <div>
+              <dt>Trading P&amp;L before costs</dt>
+              <dd id="profitLoss">—</dd>
+            </div>
+          </dl>
+          <div class="performance-timestamps">
+            <p id="performanceAsOf" class="small muted" hidden></p>
+            <p id="summaryLastSync" class="small muted" hidden>
+              Last sync · <time id="summarySyncTime"></time>
+            </p>
+          </div>
+          <div class="chart-heading">
+            <h2>Value history</h2>
+            <div class="ranges" role="group" aria-label="History period">
+              <button data-range="1M">1M</button
+              ><button data-range="3M">3M</button
+              ><button data-range="1Y">1Y</button
+              ><button data-range="ALL" aria-pressed="true">All</button>
+            </div>
+          </div>
+          <div id="historyChart" class="chart"></div>
+          <div class="chart-legend" aria-label="Chart series">
+            <span><i aria-hidden="true"></i>Portfolio value</span>
+            <span id="investedLegend" hidden
+              ><i class="invested" aria-hidden="true"></i>Net invested</span
+            >
+          </div>
+          <p id="historyNote" class="small muted"></p>
+          <p class="chart-footnote">
+            Net invested is purchases minus sale proceeds, not cash deposits.
+            Trading P&amp;L is portfolio value minus net invested, before fees
+            and taxes. Excludes cash and dividends. It is unavailable when
+            historical currency conversion is missing. Transfers or missing
+            trades can distort P&amp;L.
+          </p>
+        </section>
+        <div
+          class="overview-sidebar"
+          data-pages="overview holdings transactions"
+        >
+          <section class="holdings-panel" data-pages="overview holdings">
+            <div class="section-heading">
+              <h2>
+                <span class="section-number" aria-hidden="true">01 /</span> Your
+                holdings
+              </h2>
+              <span id="holdingSummary" class="small muted"></span>
+            </div>
+            <div class="table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Instrument</th>
+                    <th class="number">Units</th>
+                    <th class="number">Average cost</th>
+                    <th class="number">Market value</th>
+                  </tr>
+                </thead>
+                <tbody id="holdingsBody"></tbody>
+              </table>
+            </div>
+            <div class="empty" id="holdingsEmpty" hidden>
+              <h3>No holdings yet.</h3>
+              <p>Connect this account, then sync to save its first snapshot.</p>
+              <button class="button" data-connect>Connect DEGIRO</button>
+            </div>
+          </section>
+          <section class="allocation-panel" data-pages="overview">
+            <div class="section-heading">
+              <h2>
+                <span class="section-number" aria-hidden="true">02 /</span>
+                Allocation
+              </h2>
+              <span class="small muted" id="allocationCurrency"></span>
+            </div>
+            <div
+              id="allocationBar"
+              class="allocation-bar"
+              aria-hidden="true"
+            ></div>
+            <div id="allocationList" class="allocation-list"></div>
+            <p class="small muted" id="allocationNote"></p>
+          </section>
+          <section
+            class="transactions-panel"
+            data-pages="overview transactions"
+          >
+            <div class="section-heading">
+              <h2 id="transactionsHeading">Recent transactions</h2>
+              <button
+                class="text-button"
+                data-view="transactions"
+                id="allTransactionsButton"
+              >
+                View all →</button
+              ><span id="transactionSummary" class="small muted"></span>
+            </div>
+            <div class="export-toolbar" id="transactionExports" hidden>
+              <span class="small muted"
+                >Download all saved transactions for this account</span
+              >
+              <div class="export-links" aria-label="Export transactions">
+                <a class="button" data-export="csv" download>CSV</a>
+                <a class="button" data-export="pdf" download>PDF</a>
+                <a class="button" data-export="json" download>JSON</a>
+              </div>
+            </div>
+            <div class="table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Date</th>
+                    <th>Instrument</th>
+                    <th>Type</th>
+                    <th class="number">Units</th>
+                    <th class="number">Price</th>
+                  </tr>
+                </thead>
+                <tbody id="transactionsBody"></tbody>
+              </table>
+            </div>
+            <p class="empty" id="transactionsEmpty" hidden>
+              No transactions saved for this account.
+            </p>
+          </section>
+        </div>
+      </div>
+      <section class="simulator" data-pages="simulator" hidden>
+        <div class="simulation-output">
+          <p class="eyebrow">Hypothetical scenario</p>
+          <h2 class="simulation-value" id="simResult"></h2>
+          <div id="simulationChart" class="chart"></div>
+          <p class="small muted" id="simBreakdown"></p>
+          <p class="chart-footnote">
+            Green: simulated value. Gray: starting value and contributions.
+          </p>
+        </div>
+        <div class="assumptions">
+          <label class="field"
+            >Starting value<input
+              class="input"
+              id="simInitial"
+              type="number"
+              min="0"
+              max="1000000000"
+              step="any"
+              value="0" /></label
+          ><label class="field"
+            >Monthly contribution<input
+              class="input"
+              id="simMonthly"
+              type="number"
+              min="0"
+              max="1000000"
+              step="any"
+              value="100"
+          /></label>
+          <p class="small muted" id="simMonthlyNote" aria-live="polite"></p>
+          <div id="returnHelp">
+            <label class="field" for="simRate">Assumed annual return (%)</label
+            ><button
+              id="returnInfo"
+              class="text-button"
+              aria-expanded="false"
+              aria-controls="returnTooltip"
+            >
+              Historical context ⓘ</button
+            ><input
+              class="input"
+              id="simRate"
+              type="number"
+              min="-99"
+              max="100"
+              step="0.1"
+              value="5"
+            />
+            <div id="returnTooltip" class="return-tooltip" hidden></div>
+          </div>
+          <label class="field"
+            >Years<input
+              class="input"
+              id="simYears"
+              type="number"
+              min="1"
+              max="50"
+              step="1"
+              value="10"
+          /></label>
+          <p class="small muted">
+            5% is a hypothetical input, not a forecast. Monthly compounding and
+            end-of-month contributions; excludes fees, tax, inflation and
+            volatility. Losses are possible.
+          </p>
+        </div>
+      </section>
+      <section class="accounts-view" data-pages="accounts" hidden>
+        <div class="section-heading">
+          <p class="small muted">
+            Each account has its own credentials, snapshots and transactions.
+          </p>
+          <button class="button primary" id="addAccountButton">
+            + Add account
+          </button>
+        </div>
+        <div id="accountList"></div>
+        <div class="operations-note">
+          <div class="section-heading">
+            <div>
+              <h2>Keep Sure up to date.</h2>
+              <p>
+                Give Sure read-only access to your saved holdings. It refreshes
+                them on its own schedule, even when this page is closed.
+              </p>
+            </div>
+            <button class="button" id="connectSureButton">Connect Sure</button>
+          </div>
+          <p class="small muted">
+            Securities only, separated by currency. Cash balances and native
+            Sure trades are not included.
+          </p>
+          <div id="sureConnections" aria-live="polite"></div>
+        </div>
+        <div class="operations-note">
+          <h2>Works while you’re away.</h2>
+          <p>
+            Scheduled syncs run on your server, even when this page is closed.
+            Use the terminal for setup, account connections and manual syncs.
+          </p>
+          <code>docker compose exec app degitide status</code>
+          <p>Opening a VPS dashboard from your laptop:</p>
+          <code>degitide open --ssh user@your-vps</code>
+          <p>
+            Optional Telegram or Pushover alerts tell you when an account fails
+            and when it recovers. Configure them on the server.
+          </p>
+        </div>
+      </section>
+      <footer class="app-footer">
+        <div class="footer-status">
+          <span id="lastSync">No saved snapshot yet</span>
+          <button class="text-button" id="refreshButton">Refresh view</button>
+          <button class="text-button" id="changelogButton">What’s new</button>
+        </div>
+        <div
+          id="versions"
+          class="footer-versions"
+          aria-label="Installed versions"
+        >
+          <span>Loading versions…</span>
+        </div>
+      </footer>
+    </main>
+    <dialog id="changelogDialog" aria-labelledby="changelogTitle">
+      <div class="dialog-head">
+        <div>
+          <p class="eyebrow">Release notes</p>
+          <h2 id="changelogTitle">What’s new</h2>
+        </div>
+        <button type="button" class="close" data-close="changelogDialog" aria-label="Close release notes">×</button>
+      </div>
+      <p class="dialog-copy" id="changelogVersion">Changes included in this app.</p>
+      <p id="changelogStatus" class="dialog-copy" role="status" aria-live="polite"></p>
+      <div id="changelogEntries"></div>
+      <p class="small muted"><a href="https://github.com/tatoalo/degitide/releases" target="_blank" rel="noopener noreferrer">All releases on GitHub ↗</a></p>
+    </dialog>
+    <dialog id="sureDialog" aria-labelledby="sureTitle">
+      <div class="dialog-head">
+        <div>
+          <p class="eyebrow">Integrations</p>
+          <h2 id="sureTitle">Your holdings, in Sure.</h2>
+        </div>
+        <button
+          type="button"
+          class="close"
+          id="closeSureDialog"
+          aria-label="Close setup"
+        >
+          ×
+        </button>
+      </div>
+      <p class="dialog-copy">
+        A read-only connection. Your DEGIRO login stays in Degitide.
+      </p>
+      <ol class="sure-steps" aria-label="Connection progress">
+        <li data-sure-progress="1" aria-current="step">
+          <span>1</span> Prepare
+        </li>
+        <li data-sure-progress="2"><span>2</span> Connect</li>
+        <li data-sure-progress="3"><span>3</span> Check</li>
+      </ol>
+
+      <form id="sureForm" data-sure-step="1">
+        <h3 class="sure-step-title" tabindex="-1">
+          How will Sure reach Degitide?
+        </h3>
+        <p class="sure-help">
+          Choose the address Sure’s server can use, even when your laptop is
+          off.
+        </p>
+        <fieldset class="sure-methods">
+          <legend class="sr-only">Connection type</legend>
+          <label
+            ><input
+              type="radio"
+              name="sureMethod"
+              value="docker"
+              checked
+            /><span
+              ><strong>Same Docker host</strong
+              ><small>Use a private network</small></span
+            ></label
+          >
+          <label
+            ><input type="radio" name="sureMethod" value="https" /><span
+              ><strong>HTTPS address</strong
+              ><small>Use your hosted Degitide URL</small></span
+            ></label
+          >
+        </fieldset>
+        <label class="sure-label" for="sureBaseURL">Degitide address</label>
+        <input
+          id="sureBaseURL"
+          class="input"
+          type="url"
+          placeholder="http://degitide-sure:8391"
+          required
+          aria-describedby="sureAddressHelp"
+        />
+        <p id="sureAddressHelp" class="sure-help">
+          Use this address after connecting both apps to the private Docker
+          network below.
+        </p>
+        <details class="sure-details" id="sureServerSetup">
+          <summary>First time? Set up the network &amp; Sure adapter</summary>
+          <div id="sureDockerSetup">
+            <p>
+              <strong>1. Connect the containers.</strong> In your Degitide
+              deployment directory, create the network once and add the Sure
+              override to your usual Compose files:
+            </p>
+            <pre><code>docker network create --internal degitide-sure
+docker compose -f docker-compose.yml \
+  -f docker-compose.sure.yml up -d</code></pre>
+            <p>
+              In Sure’s Compose file, attach both <strong>web</strong> and
+              <strong>worker</strong> to that network. Keep their existing
+              networks:
+            </p>
+            <pre><code>services:
+  web:
+    networks: [default, degitide]
+  worker:
+    networks: [default, degitide]
+networks:
+  degitide:
+    external: true
+    name: degitide-sure</code></pre>
+            <p>
+              Sure must use self-hosted mode to allow this private HTTP address.
+              <a
+                href="https://github.com/tatoalo/degitide#connect-containers-on-the-same-vps"
+                target="_blank"
+                rel="noopener noreferrer"
+                >Full Docker instructions ↗</a
+              >
+            </p>
+          </div>
+          <div id="sureHTTPSSetup" hidden>
+            <p>
+              <strong>1. Make Degitide reachable.</strong> Use its HTTPS
+              address, not the Sure URL or a temporary SSH tunnel. Both Sure
+              services must be able to reach it.
+            </p>
+            <p>
+              Add the hostname to <code>DEGITIDE_ALLOWED_HOSTS</code> in your
+              Degitide configuration and recreate the app. For example,
+              <code>portfolio.example.com</code> for
+              <code>https://portfolio.example.com</code>. Keep any existing
+              allowed hosts.
+            </p>
+          </div>
+          <p>
+            <strong>2. Install the Sure adapter.</strong> This makes positions
+            disappear from Sure when you sell them completely. Install it in
+            both Sure web and worker, then recreate those services.
+          </p>
+          <a
+            href="https://github.com/tatoalo/degitide/blob/main/integrations/sure/README.md#install-in-sure"
+            target="_blank"
+            rel="noopener noreferrer"
+            >Open adapter installation guide ↗</a
+          >
+          <p>
+            <strong>3. Sync your accounts in Degitide.</strong> Complete a
+            successful sync before importing into Sure.
+          </p>
+        </details>
+        <label class="sure-label" for="sureAccount"
+          >Which accounts do you want to share?</label
+        >
+        <select
+          id="sureAccount"
+          class="input"
+          aria-describedby="sureAccountHelp"
+        >
+          <option value="">All current accounts</option>
+        </select>
+        <p id="sureAccountHelp" class="sure-help">
+          Accounts you add later stay private. Each currency appears separately
+          in Sure.
+        </p>
+        <div class="sure-scope">
+          <strong>Holdings &amp; their value</strong
+          ><span>Cash balances and investment trades are not included.</span>
+        </div>
+        <p id="sureError" class="form-error" role="alert" hidden></p>
+        <div class="dialog-actions">
+          <button type="submit" class="button primary" id="createSureToken">
+            Create connection token →
+          </button>
+        </div>
+      </form>
+
+      <section data-sure-step="2" hidden>
+        <h3 class="sure-step-title" tabindex="-1">Now switch to Sure.</h3>
+        <p class="sure-help">
+          Keep this window open while you finish these steps.
+        </p>
+        <ol class="sure-instructions">
+          <li>
+            <div>
+              <strong>Copy your connection token</strong>
+              <p id="sureTokenExpiry">
+                Use once within 30 minutes. Treat it like a password.
+              </p>
+              <label class="sr-only" for="sureToken"
+                >One-time connection token</label
+              >
+              <textarea
+                id="sureToken"
+                class="input"
+                readonly
+                rows="2"
+                spellcheck="false"
+              ></textarea>
+              <button type="button" class="button primary" id="copySureToken">
+                Copy token
+              </button>
+            </div>
+          </li>
+          <li>
+            <div>
+              <strong>In Sure, open Add account → SimpleFIN</strong>
+              <p>
+                Paste the token into the setup-token field and continue. You
+                don’t need a paid SimpleFIN account or a Sure API key.
+              </p>
+            </div>
+          </li>
+          <li>
+            <div>
+              <strong>Link your accounts as Investment / Brokerage</strong>
+              <p>
+                Link each currency separately. Reconnecting? Choose your
+                existing Sure accounts to avoid duplicates.
+              </p>
+            </div>
+          </li>
+        </ol>
+        <div class="dialog-actions">
+          <button type="button" class="button primary" id="checkSureConnection">
+            Check connection →
+          </button>
+        </div>
+      </section>
+
+      <section data-sure-step="3" hidden>
+        <h3 class="sure-step-title" tabindex="-1">Check the connection.</h3>
+        <div class="sure-check" id="sureCheck" role="status" aria-live="polite">
+          <strong id="sureCheckTitle">Checking…</strong>
+          <p id="sureCheckDetail"></p>
+        </div>
+        <p class="sure-help">
+          Sure controls when it refreshes. Run a sync in Sure to try it now,
+          then check the imported holdings there. A connection check can’t
+          verify Sure’s account links or balances.
+        </p>
+        <details class="sure-details">
+          <summary>Nothing showing up in Sure?</summary>
+          <ul>
+            <li>
+              Finish linking every currency account in Sure and run a sync
+              there.
+            </li>
+            <li>
+              Run a fresh Degitide sync if your saved holdings are more than 36
+              hours old or the last sync failed.
+            </li>
+            <li>
+              Check that Sure web and worker can reach the Degitide address and
+              have the adapter installed.
+            </li>
+            <li>Enable Sure’s background sync for automatic updates.</li>
+          </ul>
+        </details>
+        <div class="dialog-actions sure-check-actions">
+          <button type="button" class="text-button" id="backSureToken">
+            Back to instructions
+          </button>
+          <button type="button" class="button" id="refreshSureConnection">
+            Check again
+          </button>
+          <button
+            type="button"
+            class="button primary"
+            id="finishSureSetup"
+            hidden
+          >
+            Done
+          </button>
+          <button
+            type="button"
+            class="button primary"
+            id="restartSureSetup"
+            hidden
+          >
+            Create a new token
+          </button>
+        </div>
+      </section>
+    </dialog>
+    <dialog id="scheduleDialog" aria-labelledby="scheduleTitle">
+      <form id="scheduleForm">
+        <div class="dialog-head">
+          <h2 id="scheduleTitle">Sync settings</h2>
+          <button type="button" class="close" data-close="scheduleDialog" aria-label="Close">×</button>
+        </div>
+        <p class="dialog-copy">Applies to all accounts. Each account follows its own held markets. Sync continues when the dashboard is closed.</p>
+        <p id="scheduleSource" class="small muted"></p>
+        <label class="field">Automatic sync
+          <select class="input" id="scheduleMode">
+            <option value="market">Follow held markets</option>
+            <option value="cron">Custom cron schedule</option>
+            <option value="manual">Paused · manual sync only</option>
+          </select>
+        </label>
+        <fieldset id="marketSettingsFields" class="schedule-fields">
+          <legend class="sr-only">Market-hours settings</legend>
+          <div class="schedule-field-row">
+            <label class="field">While markets are open<input class="input" id="scheduleInterval" type="number" min="5" max="240" step="1" required><span class="hint">Minutes between syncs · 5–240</span></label>
+            <label class="field">After market close<input class="input" id="scheduleCloseDelay" type="number" min="0" max="120" step="1" required><span class="hint">Minutes after close · 0–120</span></label>
+          </div>
+          <div class="schedule-field-row" id="dailySafetyFields">
+            <label class="field">Daily safety check<input class="input" id="scheduleSafetyTime" type="time" required></label>
+            <label class="field">Timezone<input class="input" id="scheduleTimezone" list="scheduleTimezones" maxlength="100" required placeholder="Europe/Dublin"></label>
+          </div>
+          <datalist id="scheduleTimezones"><option value="Europe/Dublin"><option value="Europe/Berlin"><option value="Europe/London"><option value="America/New_York"><option value="UTC"></datalist>
+          <p class="small muted">Only refreshes snapshots at least 10 hours old. Choose a daily time before Sure imports. Changing it can affect the feed’s 36-hour freshness limit.</p>
+          <details id="advancedSafety" class="schedule-advanced">
+            <summary>Advanced safety schedule</summary>
+            <label class="schedule-checkbox"><input id="customSafety" type="checkbox"> Use a custom cron rule</label>
+            <label class="field" id="customSafetyField" hidden>Safety check rule<input class="input" id="scheduleMaintenance" maxlength="256"></label>
+          </details>
+        </fieldset>
+        <label class="field" id="customScheduleField" hidden>Custom schedule<input class="input" id="scheduleCron" maxlength="256" placeholder="CRON_TZ=Europe/Dublin 0 18 * * 1-5"><span class="hint">Replaces market-hours, after-close and daily safety rules. All accounts sync on this schedule.</span></label>
+        <p id="schedulePausedCopy" class="small muted" hidden>Automatic refreshes and retries are paused. A sync already running may finish. You can still sync manually.</p>
+        <p id="scheduleError" class="error" role="alert"></p>
+        <div class="dialog-actions schedule-actions">
+          <button type="button" class="button" id="resetSchedule">Restore deployment defaults</button>
+          <button class="button primary" id="saveSchedule" type="submit">Save settings →</button>
+        </div>
+        <p class="small muted">Saved in this workspace’s database. Changes apply immediately and survive restarts; a sync already running finishes normally.</p>
+      </form>
+    </dialog>
+    <dialog id="accountDialog" aria-labelledby="newAccountTitle">
+      <form id="accountForm">
+        <div class="dialog-head">
+          <h2 id="newAccountTitle">Add an account</h2>
+          <button
+            type="button"
+            class="close"
+            data-close="accountDialog"
+            aria-label="Close"
+          >
+            ×
+          </button>
+        </div>
+        <p class="dialog-copy">
+          Give it a name you’ll recognize. Connect its DEGIRO login next.
+        </p>
+        <label class="field"
+          >Account name<input
+            class="input"
+            name="name"
+            maxlength="80"
+            placeholder="e.g. Long-term savings"
+            required
+        /></label>
+        <p id="accountError" class="error" role="alert"></p>
+        <div class="dialog-actions">
+          <button class="button primary" type="submit">Continue to DEGIRO →</button>
+        </div>
+      </form>
+    </dialog>
+    <dialog id="degiroDialog" aria-labelledby="degiroDialogTitle">
+      <form id="degiroForm" action="/api/degiro/reauthenticate">
+        <div class="dialog-head">
+          <div>
+            <p class="eyebrow">Account setup</p>
+            <h2 id="degiroDialogTitle">Connect DEGIRO</h2>
+          </div>
+          <button
+            type="button"
+            class="close"
+            data-close="degiroDialog"
+            aria-label="Close"
+          >
+            ×
+          </button>
+        </div>
+        <p class="dialog-copy" id="connectCopy">
+          Connect the DEGIRO login for this account.
+        </p>
+        <ol class="connect-steps" aria-label="Account setup progress">
+          <li><span aria-hidden="true">✓</span> Account ready</li>
+          <li aria-current="step"><span aria-hidden="true">2</span> Connect</li>
+          <li><span aria-hidden="true">3</span> First sync</li>
+        </ol>
+        <fieldset id="connectCredentials">
+          <legend class="sr-only">DEGIRO credentials</legend>
+          <label class="field"
+            >DEGIRO username<input
+              class="input"
+              id="degiroUsername"
+              autocomplete="username"
+              autocapitalize="none"
+              maxlength="256"
+              required /></label
+          ><label class="field"
+            >DEGIRO password<input
+              class="input"
+              id="degiroPassword"
+              type="password"
+              autocomplete="current-password"
+              maxlength="512"
+              required /></label
+          ><label class="field"
+            >Authenticator setup secret<input
+              class="input"
+              id="degiroSeed"
+              type="password"
+              autocomplete="off"
+              minlength="16"
+              maxlength="2048"
+              required
+            /><span class="hint"
+              >The setup key or otpauth:// export, rather than a six-digit code.
+              Used for automatic reconnection.</span
+            ></label
+          >
+          <p class="small muted">
+            Credentials and the saved session are encrypted at rest. Protect the
+            separate key, host and backups.
+          </p>
+          <p class="small muted">Once connected, we’ll sync this account to import your holdings.</p>
+        </fieldset>
+        <section id="connectProgress" class="connection-progress" aria-labelledby="connectProgressTitle" hidden>
+          <div class="connection-progress-head">
+            <span class="connection-spinner" aria-hidden="true"></span>
+            <h3 id="connectProgressTitle" tabindex="-1">Connecting to DEGIRO</h3>
+          </div>
+          <p>Signing in, verifying access and saving your encrypted session.</p>
+          <p id="connectWaitCopy" role="status" aria-live="polite">This can take a few minutes. Keep this window open.</p>
+          <p class="connection-elapsed" id="connectElapsed">Elapsed · 0:00</p>
+          <p class="small muted">Your credentials have been submitted. Your holdings will appear after the first sync.</p>
+        </section>
+        <p id="loginError" class="error" role="alert"></p>
+        <div class="dialog-actions">
+          <button type="button" class="button" data-close="degiroDialog">
+            Cancel</button
+          ><button class="button primary" id="submitLoginButton" type="submit">
+            Connect and sync →
+          </button>
+        </div>
+      </form>
+    </dialog>
+  </body>
+</html>

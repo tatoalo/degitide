@@ -1,0 +1,7 @@
+Set up Degitide, the self-hosted DEGIRO portfolio tracker, on this machine. Carry out the installation and verify it works.
+
+Use the official project at https://github.com/tatoalo/degitide. Reuse my existing checkout or clone the public repository into a new project directory. Read the repository's current Docker setup instructions.
+
+Check Docker and Compose v2. If an installation already exists, check its health and preserve its volumes, credentials, settings and version. For a fresh install, start the default single-container stack with docker compose up --build -d. Keep the dashboard bound to loopback. Verify that http://127.0.0.1:8391/healthz returns success on the Docker host.
+
+Open the local dashboard for me, or help me reach it through an SSH tunnel if the host is remote. Let me create my administrator account and enter my DEGIRO sign-in details directly in the dashboard. Keep passwords, tokens and authenticator codes out of this conversation. Once I have connected the account, start the first sync if needed and check that it finishes using the dashboard or CLI status. Report the dashboard URL and sync status without printing portfolio data.

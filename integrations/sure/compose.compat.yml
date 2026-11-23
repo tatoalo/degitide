@@ -1,0 +1,20 @@
+# Add this to Sure's Compose invocation, not Degitide's.
+# Set DEGITIDE_SOURCE to the absolute path of this checkout on the Docker host.
+# Tested with Sure v0.7.6. Re-run `make test-sure` before upgrading Sure.
+services:
+  web:
+    volumes:
+      - type: bind
+        source: ${DEGITIDE_SOURCE:?Set DEGITIDE_SOURCE to your Degitide checkout}/integrations/sure/degitide_simplefin.rb
+        target: /rails/config/initializers/degitide_simplefin.rb
+        read_only: true
+        bind:
+          create_host_path: false
+  worker:
+    volumes:
+      - type: bind
+        source: ${DEGITIDE_SOURCE:?Set DEGITIDE_SOURCE to your Degitide checkout}/integrations/sure/degitide_simplefin.rb
+        target: /rails/config/initializers/degitide_simplefin.rb
+        read_only: true
+        bind:
+          create_host_path: false

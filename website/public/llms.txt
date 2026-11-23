@@ -1,0 +1,21 @@
+# Degitide
+
+> Degitide saves DEGIRO holdings and transactions on your own server. Use its dashboard or CLI to follow multiple accounts, compare holdings value with net invested, and export your history.
+
+The public website is an interactive demo with fictional holdings. To connect a real account, run Degitide on your own computer or VPS. [Source code](https://github.com/tatoalo/degitide) and [release downloads](https://github.com/tatoalo/degitide/releases) are public.
+
+## Product and setup
+
+To read the full guide directly, request `https://degitide.trade/` with `Accept: text/markdown`.
+
+- [Full guide in Markdown](https://degitide.trade/llms-full.txt) covers installation, sync timing, P&L, exports, the policy proxy, and one-way imports into Sure.
+- [Portfolio demo](https://degitide.trade/#portfolio) lets you switch between sample accounts and inspect the chart.
+- [Architecture](https://degitide.trade/#architecture) shows a portfolio sync, a blocked order request, and Sure reading a saved snapshot.
+- [Get started](https://degitide.trade/#setup) has the Docker commands for an existing source checkout.
+- [Set up with an agent](https://degitide.trade/#agent-setup) opens the installation prompt in Codex, Claude Code, or Cursor. The same [plain-text setup prompt](https://degitide.trade/setup-prompt.txt) works with another agent that has terminal access.
+- [Common questions](https://degitide.trade/#questions) covers data storage, background sync, and trading limits.
+
+## Project
+
+- [Alessandro Pogliaghi](https://apogliaghi.com/) built Degitide independently of DEGIRO.
+- [Contact Alessandro](https://apogliaghi.com/contact/) for questions about the project.

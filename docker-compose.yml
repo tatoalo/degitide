@@ -1,0 +1,34 @@
+services:
+  app:
+    image: "${DEGITIDE_IMAGE:-degitide}"
+    build:
+      context: .
+      target: all-in-one-runtime
+    restart: unless-stopped
+    stop_grace_period: 45s
+    ports:
+      - "127.0.0.1:8391:8391"
+    volumes:
+      - degitide:/data
+    environment:
+      DEGITIDE_ALLOWED_HOSTS: "${DEGITIDE_ALLOWED_HOSTS:-127.0.0.1,localhost,[::1]}"
+      DEGITIDE_SCHEDULE: "${DEGITIDE_SCHEDULE:-market}"
+      DEGITIDE_SYNC_INTERVAL_MINUTES: "${DEGITIDE_SYNC_INTERVAL_MINUTES:-60}"
+      DEGITIDE_MAINTENANCE_SCHEDULE: "${DEGITIDE_MAINTENANCE_SCHEDULE:-CRON_TZ=Europe/Dublin 0 2 * * *}"
+      DEGITIDE_BROWSER_IDLE_SECONDS: "${DEGITIDE_BROWSER_IDLE_SECONDS:-300}"
+      DEGITIDE_NOTIFY_PROVIDER: "${DEGITIDE_NOTIFY_PROVIDER:-}"
+      DEGITIDE_TELEGRAM_TOKEN: "${DEGITIDE_TELEGRAM_TOKEN:-}"
+      DEGITIDE_TELEGRAM_CHAT_ID: "${DEGITIDE_TELEGRAM_CHAT_ID:-}"
+      DEGITIDE_PUSHOVER_TOKEN: "${DEGITIDE_PUSHOVER_TOKEN:-}"
+      DEGITIDE_PUSHOVER_USER: "${DEGITIDE_PUSHOVER_USER:-}"
+    read_only: true
+    tmpfs:
+      - /tmp:mode=1777
+      - /home/degitide-worker:mode=700,uid=10001,gid=10001
+    shm_size: "1gb"
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+volumes:
+  degitide:

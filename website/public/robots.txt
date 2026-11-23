@@ -1,0 +1,8 @@
+User-agent: *
+Allow: /
+
+Sitemap: https://degitide.trade/sitemap.xml
+
+# Markdown index: https://degitide.trade/llms.txt
+# Full product guide: https://degitide.trade/llms-full.txt
+# Setup prompt: https://degitide.trade/setup-prompt.txt

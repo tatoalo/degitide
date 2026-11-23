@@ -1,0 +1,48 @@
+# Degitide product guide
+
+> A self-hosted portfolio companion for DEGIRO. Degitide keeps holdings, transactions, and valuation history in SQLite on your server. You can browse them in the Observatory dashboard, export them, or let a self-hosted Sure instance read selected accounts.
+
+## Can I track several DEGIRO accounts on one server?
+
+Yes. One administrator can manage several broker accounts. Each account has its own credentials, saved session, holdings, and transaction history. The dashboard keeps currency totals separate and uses DEGIRO's base-currency conversions when available. The [portfolio demo](https://degitide.trade/#portfolio) has two fictional accounts you can switch between.
+
+## Will it keep syncing when I close my browser?
+
+Yes. The scheduler runs on the server. By default it refreshes each account hourly while a held stock or ETF market is open, and again after the market closes. Quote freshness depends on what DEGIRO supplies. You can change the schedule, pause it, or start a manual sync from the dashboard or CLI. Optional Telegram or Pushover messages report failures and recovery.
+
+## What does trading P&L mean here?
+
+Net invested is cumulative purchases minus sale proceeds in the same currency. Trading P&L is holdings value minus that net invested amount. For example, €1,000 in purchases and €200 in sales leaves €800 net invested. If the remaining holdings are worth €950, trading P&L is €150.
+
+This measure includes realized and unrealized trading gains before fees and taxes. It excludes cash and dividends. It needs a complete, comparable trade history. Transfers and missing trades can distort it. The dashboard's growth simulator shows a separate projection based on contributions and an assumed return.
+
+## Where do my credentials live? Can Degitide place orders?
+
+Enter your DEGIRO credentials in your own installation. Degitide encrypts saved credentials and session checkpoints on your server. Protect the host and its backups, including the encryption key. The public demo uses illustrative data and has no broker connection.
+
+Degitide has no trading controls. Its policy proxy permits reviewed broker reads, reports and quotes, and rejects order requests. The default Docker setup runs the app, worker and proxy in one container with shared storage and networking. The advanced split deployment isolates services and restricts worker network access. A DEGIRO web session still carries the privileges granted by the broker. The [architecture diagram](https://degitide.trade/#architecture) shows both deployments.
+
+## Can I export the records or bring them into Sure?
+
+You can export saved transactions as CSV, PDF, or JSON. For a one-way import into self-hosted Sure, install the supplied compatibility adapter in Sure's web and worker services. In Degitide, open Accounts → Connect Sure, choose the accounts to share, and claim the setup token in Sure's SimpleFIN integration. Sure reads saved holdings and valuations on its own schedule. The feed has no access to your DEGIRO credentials. You can revoke future reads in Degitide.
+
+## How do I install it and open the dashboard?
+
+The [public website](https://degitide.trade/) is a product demo. The [MIT-licensed source](https://github.com/tatoalo/degitide) and [release downloads](https://github.com/tatoalo/degitide/releases) are public.
+
+On the [homepage](https://degitide.trade/#agent-setup), select Copy prompt or open it in Codex, Claude Code, or Cursor. Select Show raw prompt to read it in place. The complete [plain-text prompt](https://degitide.trade/setup-prompt.txt) is also available. The agent needs terminal access to the target host. Enter your sign-in details in your own dashboard.
+
+From a source checkout on a machine with Docker and Compose, run:
+
+```sh
+docker compose up --build -d
+docker compose exec app degitide setup
+docker compose exec app degitide connect
+docker compose exec app degitide sync
+```
+
+Open http://127.0.0.1:8391 on that machine. Setup creates the local Degitide administrator. Connect signs in to DEGIRO. For a VPS, the laptop CLI command `degitide open --ssh user@your-vps` opens the dashboard through an SSH tunnel. Closing the tunnel leaves scheduled syncs running.
+
+## Who makes Degitide?
+
+[Alessandro Pogliaghi](https://apogliaghi.com/) built Degitide. It is independent of DEGIRO. The [agent index](https://degitide.trade/llms.txt) links to the public demo, architecture, and setup overview.

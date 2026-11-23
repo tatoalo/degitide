@@ -1,0 +1,8 @@
+node_modules/
+dist/
+.cloudflare/
+qa/
+.DS_Store
+*.log
+
+.openai/hosting.json

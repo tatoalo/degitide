@@ -1,0 +1,20 @@
+services:
+  init:
+    image: degitide-all-in-one:local
+    build:
+      target: all-in-one-runtime
+    entrypoint: [sh, -c, "chown 10001:10001 /data && chmod 700 /data"]
+  degitide:
+    image: degitide-all-in-one:local
+    build:
+      target: all-in-one-runtime
+    environment:
+      DEGITIDE_API_TOKEN_FILE: ""
+    tmpfs:
+      - /home/degitide-worker:mode=700,uid=10001,gid=10001
+    stop_grace_period: 45s
+  broker-fixture:
+    environment:
+      FIXTURE_TOKEN_FILE: /degitide/secrets/worker-token
+    volumes:
+      - degitide-data:/degitide:ro

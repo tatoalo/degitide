@@ -1,0 +1,207 @@
+name: Publish images
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write
+
+concurrency:
+  group: publish-images-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  REGISTRY: ghcr.io
+  RELEASE_VERSION: ${{ github.ref_type == 'tag' && github.ref_name || format('v0.0.0-pr.{0}', github.event.number) }}
+
+jobs:
+  publish:
+    if: github.event_name != 'pull_request'
+    name: ${{ matrix.image }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - image: degitide
+            package: server
+            target: all-in-one-runtime
+            description: Degitide server with browser worker and policy proxy
+          - image: degitide-app
+            package: app
+            target: app-runtime
+            description: DEGITIDE API, scheduler, dashboard, and SQLite service
+          - image: degitide-dashboard-gateway
+            package: dashboard-gateway
+            target: gateway-runtime
+            description: Storage-free loopback dashboard gateway
+          - image: degitide-worker
+            package: worker
+            target: worker-runtime
+            description: Patchright browser worker for read-only DEGIRO synchronization
+          - image: degitide-egress-proxy
+            package: egress-proxy
+            target: proxy-runtime
+            description: Default-deny HTTPS policy proxy
+          - image: degitide-bootstrap
+            package: bootstrap
+            target: bootstrap-runtime
+            description: Networkless persistent-volume bootstrap
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+
+      - name: Resolve readable build version
+        id: version
+        env:
+          RELEASE_TAG: ${{ github.ref_type == 'tag' && github.ref_name || '' }}
+        run: |
+          version="${RELEASE_TAG:-$(python3 scripts/build_version.py)}"
+          echo "value=$version" >> "$GITHUB_OUTPUT"
+
+      - name: Bundle in-app release notes
+        env:
+          VERSION: ${{ steps.version.outputs.value }}
+        run: python3 scripts/build_changelog.py "$VERSION"
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@99012661954931238ded8c8b007157a8430204e1 # v4.4.0
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+
+      - name: Log in to GHCR
+        uses: docker/login-action@8aa5831fb8d48d8f76594c7ddde61ae58019f550 # v4.8.0
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Generate image metadata
+        id: meta
+        uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302 # v6.2.0
+        with:
+          images: ${{ env.REGISTRY }}/${{ github.repository_owner }}/degitide/${{ matrix.package }}
+          # Only stable semver tags promote latest; main remains a rolling build.
+          # metadata-action excludes prereleases from its automatic latest tag.
+          flavor: latest=auto
+          tags: |
+            type=ref,event=branch
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=sha,prefix=sha-
+          labels: |
+            org.opencontainers.image.title=${{ matrix.image }}
+            org.opencontainers.image.description=${{ matrix.description }}
+            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+            org.opencontainers.image.revision=${{ github.sha }}
+            org.opencontainers.image.version=${{ steps.version.outputs.value }}
+
+      - name: Build and push image
+        id: build
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: .
+          file: Dockerfile
+          target: ${{ matrix.target }}
+          build-args: VERSION=${{ steps.version.outputs.value }}
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha,scope=${{ matrix.image }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.image }}
+          provenance: mode=max
+          sbom: true
+
+  package:
+    if: github.event_name == 'pull_request' || startsWith(github.ref, 'refs/tags/v')
+    name: Release packages
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Test and package
+        env:
+          OWNER: ${{ github.repository_owner }}
+        run: |
+          go test ./...
+          sh scripts/build-release.sh "$RELEASE_VERSION" "$OWNER"
+          python3 scripts/check-release.py "$RELEASE_VERSION" "$OWNER"
+          mkdir dist/smoke
+          tar -xzf "dist/release/degitide_${RELEASE_VERSION}_linux_amd64.tar.gz" -C dist/smoke
+          test "$(dist/smoke/degitide --version)" = "degitide $RELEASE_VERSION"
+          dist/smoke/degitide help
+          python3 scripts/check-embedded-changelog.py dist/smoke/degitide "$RELEASE_VERSION" --expected internal/server/static/changelog.json
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: release-assets
+          path: dist/release/*
+          if-no-files-found: error
+          retention-days: 7
+
+  smoke:
+    name: CLI smoke (${{ matrix.target }})
+    needs: package
+    strategy:
+      matrix:
+        include:
+          - runner: macos-15-intel
+            target: darwin_amd64
+          - runner: macos-15
+            target: darwin_arm64
+          - runner: ubuntu-24.04-arm
+            target: linux_arm64
+    runs-on: ${{ matrix.runner }}
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: release-assets
+          path: dist/release
+      - name: Run downloaded CLI
+        env:
+          TARGET: ${{ matrix.target }}
+        run: |
+          tar -xzf "dist/release/degitide_${RELEASE_VERSION}_${TARGET}.tar.gz"
+          test "$(./degitide --version)" = "degitide $RELEASE_VERSION"
+          ./degitide help
+
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [publish, package, smoke]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: release-assets
+          path: dist/release
+      - name: Publish GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          extra=()
+          if [[ "$RELEASE_VERSION" == *-* ]]; then extra+=(--prerelease --latest=false); fi
+          gh release create "$RELEASE_VERSION" dist/release/* --verify-tag \
+            --title "Degitide $RELEASE_VERSION" --generate-notes "${extra[@]}"

@@ -1,0 +1,11 @@
+services:
+  app:
+    image: degitide-all-in-one:local
+    ports: !override
+      - "127.0.0.1::8391"
+    environment:
+      DEGITIDE_SCHEDULE: "${AIO_TEST_SCHEDULE:-0 0 1 1 *}"
+      DEGITIDE_BROWSER_IDLE_SECONDS: "1"
+    volumes:
+      - ./tests/integration/all-in-one/broker.py:/app/proxy/policy.py:ro
+      - ./proxy/policy.py:/integration/policy.py:ro

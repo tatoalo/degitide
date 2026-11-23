@@ -1,0 +1,108 @@
+# Synthetic integration environment. Never mount production databases or sessions.
+name: degitide-sure-e2e
+x-sure: &sure
+  # Sure v0.7.6 (605d0028), official multi-architecture release.
+  image: ghcr.io/we-promise/sure@sha256:61cd4c1fa9917200f8db4434b45d968235f375c52cdbdc81bf4a4df555a2f090
+  environment: &sure-env
+    SECRET_KEY_BASE: "00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000"  # Deterministic Rails key for the isolated test stack.
+    SELF_HOSTED: "true"
+    RAILS_FORCE_SSL: "false"
+    RAILS_ASSUME_SSL: "false"
+    POSTGRES_USER: sure_test
+    POSTGRES_PASSWORD: integration-only
+    POSTGRES_DB: sure_test
+    DB_HOST: db
+    DB_PORT: "5432"
+    REDIS_URL: redis://redis:6379/1
+    RAILS_LOG_LEVEL: warn
+  volumes:
+    - sure-storage:/rails/storage
+    - ./inspect.rb:/integration/inspect.rb:ro
+    - ./guards.rb:/integration/guards.rb:ro
+    - ./runner.rb:/integration/runner.rb:ro
+  networks: [test]
+
+services:
+  init:
+    image: degitide-sure-e2e-app
+    build: {context: ../../.., target: app-runtime}
+    user: "0:0"
+    entrypoint: [sh, -c, "chown 10000:10000 /data && chmod 700 /data"]
+    network_mode: none
+    volumes: ["degitide-data:/data"]
+  degitide:
+    image: degitide-sure-e2e-app
+    build: {context: ../../.., target: app-runtime}
+    environment:
+      DEGITIDE_BIND: 0.0.0.0
+      DEGITIDE_API_TOKEN: integration-dashboard-token
+      DEGITIDE_ALLOWED_HOSTS: localhost,127.0.0.1,degitide-sure
+      DEGITIDE_DB: /data/degitide.db
+      DEGITIDE_WORKER_URL: http://broker-fixture:9377
+      DEGITIDE_WORKER_TOKEN: integration-worker-token
+      DEGITIDE_SCHEDULE: "0 0 1 1 *"
+    volumes: ["degitide-data:/data"]
+    ports: ["127.0.0.1::8391"]
+    networks:
+      test:
+        aliases: [degitide-sure]
+    depends_on:
+      init: {condition: service_completed_successfully}
+      broker-fixture: {condition: service_started}
+    read_only: true
+    tmpfs: [/tmp]
+    security_opt: ["no-new-privileges:true"]
+    cap_drop: [ALL]
+  broker-fixture:
+    image: python:3.12-slim-bookworm
+    command: [python, -u, /fixture/worker.py]
+    volumes: ["./worker.py:/fixture/worker.py:ro", "fixture-state:/state"]
+    ports: ["127.0.0.1::9377"]
+    networks: [test]
+  web:
+    <<: *sure
+    ports: ["127.0.0.1::3000"]
+    depends_on:
+      db: {condition: service_healthy}
+      redis: {condition: service_healthy}
+    healthcheck:
+      test: [CMD, ruby, -rnet/http, -e, "exit(Net::HTTP.get_response(URI('http://127.0.0.1:3000/up')).code == '200' ? 0 : 1)"]
+      interval: 3s
+      timeout: 3s
+      retries: 40
+      start_period: 30s
+  worker:
+    <<: *sure
+    command: bundle exec sidekiq
+    depends_on:
+      web: {condition: service_healthy}
+  db:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: sure_test
+      POSTGRES_PASSWORD: integration-only
+      POSTGRES_DB: sure_test
+    volumes: ["postgres-data:/var/lib/postgresql/data"]
+    networks: [test]
+    healthcheck:
+      test: [CMD, pg_isready, -U, sure_test, -d, sure_test]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+  redis:
+    image: redis:7-alpine
+    volumes: ["redis-data:/data"]
+    networks: [test]
+    healthcheck:
+      test: [CMD, redis-cli, ping]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+networks:
+  test: {}
+volumes:
+  degitide-data:
+  fixture-state:
+  sure-storage:
+  postgres-data:
+  redis-data:
