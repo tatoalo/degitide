@@ -35,6 +35,32 @@ class MarketCalendarTest(TestCase):
             self.assertEqual(row["open"][11:16], start)
             self.assertEqual(row["close"][11:16], end)
 
+    def test_tradegate_vwce_sessions_follow_berlin_hours_and_holidays(self):
+        def hours(now):
+            return {row["open"][:10]: (row["open"][11:16], row["close"][11:16])
+                    for row in self.schedule("XGAT", now)}
+
+        self.assertEqual(hours("2026-11-23T09:53:00")["2026-11-23"], ("06:30", "21:00"))
+        spring = hours("2026-03-27T12:00:00")
+        self.assertEqual(spring["2026-03-30"], ("05:30", "20:00"))
+        for closed in ("2026-03-28", "2026-04-03", "2026-04-06"):
+            self.assertNotIn(closed, spring)
+        year_end = hours("2026-12-17T12:00:00")
+        self.assertEqual(year_end["2026-12-30"], ("06:30", "13:00"))
+        for closed in ("2026-12-24", "2026-12-25", "2026-12-31", "2027-01-01"):
+            self.assertNotIn(closed, year_end)
+        self.assertEqual(hours("2027-05-01T12:00:00")["2027-05-06"], ("05:30", "18:00"))
+
+    def test_tradegate_coverage_ends_with_published_calendar(self):
+        holdings = [{"product_id": "1", "symbol": "VWCE"}]
+        products = {"1": {"exchange_mic": "XGAT", "product_type": "131"}}
+        plan = build_schedule(holdings, products, {}, at("2027-12-15T12:00:00"))
+        self.assertEqual(datetime.fromisoformat(plan["valid_until"]), at("2027-12-31T23:00:00"))
+        self.assertEqual(plan["markets"][0]["name"], "Tradegate BSX")
+        self.assertTrue(all(row["open"][:4] == "2027" for row in plan["markets"][0]["sessions"]))
+        plan = build_schedule(holdings, products, {}, at("2027-12-31T23:30:00"))
+        self.assertEqual((plan["markets"], plan["unknown_holdings"]), ([], 1))
+
     def test_us_holiday_and_early_close(self):
         rows = self.schedule("XNYS")
         self.assertFalse(any(row["open"].startswith("2026-11-26") for row in rows))

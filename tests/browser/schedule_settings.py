@@ -1,8 +1,7 @@
 """Exercise dashboard scheduling controls against a synthetic API at desktop/mobile widths."""
 import asyncio
-from copy import deepcopy
 import json
-from urllib.parse import urlparse
+from urllib.parse import parse_qs, urlparse
 
 from patchright.async_api import async_playwright, expect
 from portfolio_valuation import SNAPSHOT, STATIC
@@ -13,30 +12,38 @@ DEFAULTS = {"mode": "market", "interval_minutes": 60, "close_delay_minutes": 20,
 
 async def exercise(browser, width):
     page = await browser.new_page(viewport={"width": width, "height": 900}, timezone_id="America/Los_Angeles")
-    saved, writes, errors = deepcopy(DEFAULTS), [], []
-    source, fail_write = "environment", False
+    accounts = [{"id": "default", "name": "Demo", "connected": True},
+                {"id": "second", "name": "Tilde", "connected": True}]
+    overrides, writes, errors = {}, [], []
+    fail_write = False
     page.on("pageerror", lambda error: errors.append(str(error)))
 
     async def route_request(route):
-        nonlocal saved, source
-        path, method = urlparse(route.request.url).path, route.request.method
+        url = urlparse(route.request.url)
+        path, method = url.path, route.request.method
+        account = parse_qs(url.query).get("account", [""])[0]
         if path == "/api/schedule":
             if method in ("PUT", "DELETE"):
-                writes.append((method, route.request.post_data_json))
+                writes.append((account, method, route.request.post_data_json))
                 if fail_write:
                     return await route.fulfill(status=500, content_type="application/json", body='{"error":"Could not save settings"}')
-                saved = route.request.post_data_json if method == "PUT" else deepcopy(DEFAULTS)
-                source = "dashboard" if method == "PUT" else "environment"
-            body = {"settings": saved, "defaults": DEFAULTS, "source": source}
+                if method == "PUT":
+                    overrides[account] = route.request.post_data_json
+                else:
+                    overrides.pop(account, None)
+            defaults = overrides.get("", DEFAULTS) if account else DEFAULTS
+            source = ("account" if account else "dashboard") if account in overrides else ("workspace" if account else "environment")
+            body = {"settings": overrides.get(account, defaults), "defaults": defaults, "source": source}
         elif path == "/api/status":
-            body = {"account": {"id": "default", "name": "Demo", "connected": True},
-                    "schedule": {**saved, "calendar_available": True, "markets": [{"mic": "XETR", "name": "Xetra", "open": True}],
+            saved = overrides.get(account, overrides.get("", DEFAULTS))
+            body = {"account": next(a for a in accounts if a["id"] == account),
+                    "schedule": {**saved, "calendar_available": True, "markets": [{"mic": "XGAT", "name": "Tradegate", "open": True}],
                                  "reason": "Automatic sync paused" if saved["mode"] == "manual" else "Market-hours refresh"}}
             if saved["mode"] == "cron":
                 body["schedule"].update(timezone="Europe/Dublin", reason="Custom schedule",
                     next_sync="2026-11-19T18:00:00Z", upcoming_runs=["2026-11-19T18:00:00Z", "2026-11-20T18:00:00Z", "2026-11-23T18:00:00Z"])
         elif path == "/api/accounts":
-            body = [{"id": "default", "name": "Demo", "connected": True}]
+            body = accounts
         elif path == "/api/portfolio/snapshot":
             body = SNAPSHOT
         elif path == "/api/versions":
@@ -60,7 +67,11 @@ async def exercise(browser, width):
     await page.goto("http://127.0.0.1:8391/")
     await page.get_by_text("How scheduling works", exact=True).click()
     await expect(page.locator(".schedule-explainer")).to_contain_text("10 hours")
+    await page.locator("#accountSelect").select_option("second")
+    await expect(page.locator("#accountName")).to_have_text("Tilde")
     await open_settings()
+    await expect(page.locator("#scheduleTitle")).to_contain_text("Tilde")
+    await expect(page.locator("#scheduleSource")).to_contain_text("follows the workspace schedule")
     await expect(page.locator("#scheduleInterval")).to_have_value("60")
     await page.locator("#scheduleInterval").fill("90")
     await page.locator("#scheduleDialog .close").click()
@@ -78,19 +89,22 @@ async def exercise(browser, width):
     await page.locator("#saveSchedule").click()
     await expect(page.locator("#scheduleError")).to_have_text("Could not save settings")
     await expect(page.locator("#scheduleDialog")).to_be_visible()
-    assert saved == DEFAULTS
+    assert not overrides
     fail_write = False
     await page.locator("#saveSchedule").click()
     await expect(page.locator("#scheduleDialog")).to_be_hidden()
-    assert saved["maintenance"] == "CRON_TZ=America/New_York 45 1 * * *"
+    assert overrides["second"]["maintenance"] == "CRON_TZ=America/New_York 45 1 * * *"
     await expect(page.locator("#marketCadence")).to_contain_text("Every 90 min")
     await expect(page.locator("#marketCadence")).to_contain_text("35 min after close")
     await page.reload()
+    await expect(page.locator("#marketCadence")).to_contain_text("Hourly")
+    await page.locator("#accountSelect").select_option("second")
+    await expect(page.locator("#accountName")).to_have_text("Tilde")
     await open_settings()
     await expect(page.locator("#scheduleInterval")).to_have_value("90")
     await expect(page.locator("#scheduleSafetyTime")).to_have_value("01:45")
     await expect(page.locator("#scheduleTimezone")).to_have_value("America/New_York")
-    await expect(page.locator("#scheduleSource")).to_contain_text("saved dashboard settings")
+    await expect(page.locator("#scheduleSource")).to_contain_text("Tilde uses its own schedule")
     await page.locator("#scheduleMode").select_option("manual")
     await page.locator("#saveSchedule").click()
     await expect(page.locator("#marketState")).to_have_text("Automatic sync paused")
@@ -104,28 +118,38 @@ async def exercise(browser, width):
     await expect(page.locator("#nextSync")).to_contain_text("18:00")
     await expect(page.locator("#scheduleRuns li")).to_have_count(3)
     await expect(page.locator("#scheduleRuns")).to_contain_text("18:00")
-    await expect(page.locator("#scheduleExpression")).to_have_text(saved["cron"])
-    saved["cron"] = "CRON_TZ=Europe/Dublin */15 9-17 * * 1-5"
+    await expect(page.locator("#scheduleExpression")).to_have_text(overrides["second"]["cron"])
+    overrides["second"]["cron"] = "CRON_TZ=Europe/Dublin */15 9-17 * * 1-5"
     await page.locator("#refreshButton").click()
     await expect(page.locator("#marketCadence")).to_have_text("Weekdays · every 15 min, 09:00–17:45 · Europe/Dublin")
     # Complex cron remains visible verbatim; don't invent a simplified meaning.
-    saved["cron"] = "CRON_TZ=Europe/Dublin 0 9 1 * 1"
+    overrides["second"]["cron"] = "CRON_TZ=Europe/Dublin 0 9 1 * 1"
     await page.locator("#refreshButton").click()
-    await expect(page.locator("#scheduleExpression")).to_have_text(saved["cron"])
+    await expect(page.locator("#scheduleExpression")).to_have_text(overrides["second"]["cron"])
     await expect(page.locator("#marketCadence")).to_have_text("Custom cron · Europe/Dublin")
     await open_settings()
     await page.locator("#resetSchedule").click()
     await expect(page.locator("#marketCadence")).to_contain_text("Hourly")
-    assert saved == DEFAULTS and source == "environment"
+    assert not overrides and all(account == "second" for account, _, _ in writes)
+    # Workspace defaults remain editable and inherited by both accounts.
+    await page.locator('button[data-view="accounts"]').click()
+    await page.locator("#workspaceScheduleButton").click()
+    await expect(page.locator("#scheduleTitle")).to_have_text("Workspace sync defaults")
+    await page.locator("#scheduleInterval").fill("75")
+    await page.locator("#saveSchedule").click()
+    await expect(page.locator("#scheduleDialog")).to_be_hidden()
+    assert overrides[""]["interval_minutes"] == 75
+    await page.locator('button[data-view="overview"]').click()
+    await expect(page.locator("#marketCadence")).to_contain_text("Every 75 min")
     # Preserve an existing advanced deployment rule when editing another field.
-    saved["maintenance"] = "CRON_TZ=UTC 0 5 * * 1-5"
+    overrides[""]["maintenance"] = "CRON_TZ=UTC 0 5 * * 1-5"
     await open_settings()
     await expect(page.locator("#customSafety")).to_be_checked()
-    await expect(page.locator("#scheduleMaintenance")).to_have_value(saved["maintenance"])
+    await expect(page.locator("#scheduleMaintenance")).to_have_value(overrides[""]["maintenance"])
     await page.locator("#scheduleInterval").fill("120")
     await page.locator("#saveSchedule").click()
     await expect(page.locator("#scheduleDialog")).to_be_hidden()
-    assert saved["maintenance"] == "CRON_TZ=UTC 0 5 * * 1-5"
+    assert overrides["second"]["maintenance"] == "CRON_TZ=UTC 0 5 * * 1-5"
     assert await page.evaluate("document.documentElement.scrollWidth <= innerWidth")
     assert not errors, errors
     await page.close()

@@ -1689,6 +1689,7 @@ $("restartSureSetup").addEventListener("click", () => {
 });
 
 let scheduleDraft = null;
+let scheduleAccount = "";
 let savingSchedule = false;
 function updateScheduleFields() {
   const market = $("scheduleMode").value === "market";
@@ -1709,10 +1710,19 @@ function updateScheduleFields() {
 }
 $("scheduleMode").addEventListener("change", updateScheduleFields);
 $("customSafety").addEventListener("change", updateScheduleFields);
-$("scheduleSettingsButton").addEventListener("click", async () => {
-  $("scheduleSettingsButton").disabled = true;
+$("scheduleSettingsButton").addEventListener("click", () => openSchedule(state.account));
+$("workspaceScheduleButton").addEventListener("click", () => openSchedule(""));
+function schedulePath(account) {
+  return account ? endpoint("/api/schedule", account) : "/api/schedule";
+}
+async function openSchedule(account) {
+  $("scheduleSettingsButton").disabled = $("workspaceScheduleButton").disabled = true;
   try {
-    const view = await api("/api/schedule");
+    const view = await api(schedulePath(account));
+    if (account && account !== state.account) return;
+    scheduleAccount = account;
+    const name = state.accounts.find(a => a.id === account)?.name || account;
+    $("scheduleTitle").textContent = account ? "Sync settings · " + name : "Workspace sync defaults";
     scheduleDraft = view.settings;
     $("scheduleMode").value = scheduleDraft.mode;
     $("scheduleInterval").value = scheduleDraft.interval_minutes;
@@ -1724,19 +1734,28 @@ $("scheduleSettingsButton").addEventListener("click", async () => {
     $("scheduleSafetyTime").value = daily ? daily[3].padStart(2, "0") + ":" + daily[2].padStart(2, "0") : "02:00";
     $("customSafety").checked = !daily;
     $("advancedSafety").open = !daily;
-    $("scheduleSource").textContent = view.source === "dashboard"
-      ? "Using saved dashboard settings. Deployment environment defaults are overridden."
-      : "Using deployment defaults. Save to override them from this dashboard.";
-    $("resetSchedule").disabled = view.source !== "dashboard";
+    if (account) {
+      $("scheduleSource").textContent = view.source === "account"
+        ? name + " uses its own schedule."
+        : name + " follows the workspace schedule. Save to give this account its own schedule.";
+      $("resetSchedule").textContent = "Use workspace schedule";
+      $("resetSchedule").disabled = view.source !== "account";
+    } else {
+      $("scheduleSource").textContent = view.source === "dashboard"
+        ? "Accounts following the workspace schedule use these saved dashboard settings."
+        : "Accounts following the workspace schedule use the deployment defaults.";
+      $("resetSchedule").textContent = "Restore deployment defaults";
+      $("resetSchedule").disabled = view.source !== "dashboard";
+    }
     $("scheduleError").textContent = "";
     updateScheduleFields();
     $("scheduleDialog").showModal();
   } catch (error) {
     showNotice(error.message, true);
   } finally {
-    $("scheduleSettingsButton").disabled = false;
+    $("scheduleSettingsButton").disabled = $("workspaceScheduleButton").disabled = false;
   }
-});
+}
 async function saveSchedule(reset = false) {
   if (savingSchedule) return;
   const settings = { ...scheduleDraft, mode: $("scheduleMode").value };
@@ -1754,10 +1773,15 @@ async function saveSchedule(reset = false) {
   controls.forEach(control => control.disabled = true);
   $("scheduleError").textContent = "";
   try {
-    await api("/api/schedule", { method: reset ? "DELETE" : "PUT", body: reset ? "{}" : JSON.stringify(settings) });
+    await api(schedulePath(scheduleAccount), { method: reset ? "DELETE" : "PUT", body: reset ? "{}" : JSON.stringify(settings) });
+    await refreshAll();
     $("scheduleDialog").close();
-    await pollStatus();
-    showNotice(reset ? "Deployment sync defaults restored." : "Sync settings saved for all accounts.");
+    const name = state.accounts.find(a => a.id === scheduleAccount)?.name || scheduleAccount;
+    if (scheduleAccount) {
+      showNotice(reset ? name + " now follows the workspace schedule." : "Sync settings saved for " + name + ".");
+    } else {
+      showNotice(reset ? "Deployment sync defaults restored." : "Workspace sync defaults saved.");
+    }
   } catch (error) {
     $("scheduleError").textContent = error.message;
     $("scheduleError").className = "error visible";

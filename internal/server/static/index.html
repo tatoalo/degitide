@@ -384,7 +384,10 @@
           <div id="sureConnections" aria-live="polite"></div>
         </div>
         <div class="operations-note">
-          <h2>Works while you’re away.</h2>
+          <div class="section-heading">
+            <h2>Works while you’re away.</h2>
+            <button type="button" class="button" id="workspaceScheduleButton">Workspace sync defaults</button>
+          </div>
           <p>
             Scheduled syncs run on your server, even when this page is closed.
             Use the terminal for setup, account connections and manual syncs.
@@ -698,7 +701,6 @@ networks:
           <h2 id="scheduleTitle">Sync settings</h2>
           <button type="button" class="close" data-close="scheduleDialog" aria-label="Close">×</button>
         </div>
-        <p class="dialog-copy">Applies to all accounts. Each account follows its own held markets. Sync continues when the dashboard is closed.</p>
         <p id="scheduleSource" class="small muted"></p>
         <label class="field">Automatic sync
           <select class="input" id="scheduleMode">
@@ -725,14 +727,14 @@ networks:
             <label class="field" id="customSafetyField" hidden>Safety check rule<input class="input" id="scheduleMaintenance" maxlength="256"></label>
           </details>
         </fieldset>
-        <label class="field" id="customScheduleField" hidden>Custom schedule<input class="input" id="scheduleCron" maxlength="256" placeholder="CRON_TZ=Europe/Dublin 0 18 * * 1-5"><span class="hint">Replaces market-hours, after-close and daily safety rules. All accounts sync on this schedule.</span></label>
+        <label class="field" id="customScheduleField" hidden>Custom schedule<input class="input" id="scheduleCron" maxlength="256" placeholder="CRON_TZ=Europe/Dublin 0 18 * * 1-5"><span class="hint">Replaces market-hours, after-close and daily safety rules.</span></label>
         <p id="schedulePausedCopy" class="small muted" hidden>Automatic refreshes and retries are paused. A sync already running may finish. You can still sync manually.</p>
         <p id="scheduleError" class="error" role="alert"></p>
         <div class="dialog-actions schedule-actions">
           <button type="button" class="button" id="resetSchedule">Restore deployment defaults</button>
           <button class="button primary" id="saveSchedule" type="submit">Save settings →</button>
         </div>
-        <p class="small muted">Saved in this workspace’s database. Changes apply immediately and survive restarts; a sync already running finishes normally.</p>
+        <p class="small muted">Changes apply immediately. Scheduled syncs continue when the dashboard is closed.</p>
       </form>
     </dialog>
     <dialog id="accountDialog" aria-labelledby="newAccountTitle">

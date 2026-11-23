@@ -123,9 +123,9 @@ func TestFallbackDublinDSTAndLegacyCron(t *testing.T) {
 			t.Fatal(got)
 		}
 	}
-	settings := s.Settings().Settings
+	settings := s.Settings("").Settings
 	settings.Mode, settings.Cron = "cron", "CRON_TZ=Europe/Dublin 0 6 * * *"
-	if err := s.SaveSettings(settings); err != nil {
+	if err := s.SaveSettings("", settings); err != nil {
 		t.Fatal(err)
 	}
 	got := s.ScheduleStatus(db.Account{ID: "default"}, marketTime("2026-08-17T00:00:00Z"))
@@ -212,10 +212,10 @@ func TestAutomaticHistoryBackfillIsBoundedButManualCanContinue(t *testing.T) {
 
 func TestCustomScheduleShowsActualUpcomingRunsAndTimezone(t *testing.T) {
 	s := marketScheduler(t)
-	settings := s.Settings().Settings
+	settings := s.Settings("").Settings
 	settings.Mode = "cron"
 	settings.Cron = "CRON_TZ=Europe/Dublin 0 6 * * *"
-	if err := s.SaveSettings(settings); err != nil {
+	if err := s.SaveSettings("", settings); err != nil {
 		t.Fatal(err)
 	}
 	// The spring DST transition changes UTC time, but the configured wall clock stays 06:00.
@@ -232,7 +232,7 @@ func TestCustomScheduleShowsActualUpcomingRunsAndTimezone(t *testing.T) {
 		t.Fatal("next sync differs from preview")
 	}
 	settings.Cron = "CRON_TZ=America/New_York 0 9-17 * * 1-5"
-	if err := s.SaveSettings(settings); err != nil {
+	if err := s.SaveSettings("", settings); err != nil {
 		t.Fatal(err)
 	}
 	status = s.ScheduleStatus(db.Account{}, marketTime("2026-11-20T22:00:00Z"))
