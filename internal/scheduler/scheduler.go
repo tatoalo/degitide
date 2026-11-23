@@ -19,26 +19,25 @@ import (
 )
 
 type Scheduler struct {
-	cron          *cron.Cron
-	database      *db.DB
-	worker        *browser.Client
-	running       atomic.Bool
-	lastErr       atomic.Value
-	ctx           context.Context
-	cancel        context.CancelFunc
-	stateMu       sync.Mutex
-	stopped       bool
-	runs          sync.WaitGroup
-	progressMu    sync.RWMutex
-	progress      Progress
-	OnResult      func(db.Account, error)
-	settingsMu    sync.RWMutex
-	settings      Settings
-	defaults      Settings
-	savedSettings bool
-	started       bool
-	entry         cron.EntryID
-	generation    uint64
+	cron        *cron.Cron
+	database    *db.DB
+	worker      *browser.Client
+	running     atomic.Bool
+	lastErr     atomic.Value
+	ctx         context.Context
+	cancel      context.CancelFunc
+	stateMu     sync.Mutex
+	stopped     bool
+	runs        sync.WaitGroup
+	progressMu  sync.RWMutex
+	progress    Progress
+	OnResult    func(db.Account, error)
+	settingsMu  sync.RWMutex
+	overrides   map[string]Settings
+	defaults    Settings
+	started     bool
+	entries     map[string]cron.EntryID
+	pendingCron map[string]string
 }
 
 var ErrPullInProgress = errors.New("a pull is already in progress")
@@ -47,11 +46,13 @@ var ErrSchedulerStopped = errors.New("scheduler is stopped")
 func New(database *db.DB, worker *browser.Client, schedule string) *Scheduler {
 	ctx, cancel := context.WithCancel(context.Background())
 	scheduler := &Scheduler{
-		cron:     cron.New(),
-		database: database,
-		worker:   worker,
-		ctx:      ctx,
-		cancel:   cancel,
+		cron:        cron.New(),
+		entries:     make(map[string]cron.EntryID),
+		pendingCron: make(map[string]string),
+		database:    database,
+		worker:      worker,
+		ctx:         ctx,
+		cancel:      cancel,
 	}
 	scheduler.defaults = Settings{Mode: "market", IntervalMinutes: 60, CloseDelayMinutes: 20, Maintenance: "CRON_TZ=Europe/Dublin 0 2 * * *"}
 	if schedule != "" && schedule != "market" {
@@ -448,7 +449,12 @@ func (s *Scheduler) triggerAccounts(ids []string, automatic bool) error {
 	s.runs.Add(1)
 	go func() {
 		defer s.runs.Done()
-		defer s.running.Store(false)
+		defer func() {
+			s.settingsMu.Lock()
+			defer s.settingsMu.Unlock()
+			s.running.Store(false)
+			s.startPendingCronLocked()
+		}()
 		failures := []string{}
 		interrupted := false
 		for index, account := range accounts {

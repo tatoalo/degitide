@@ -111,7 +111,7 @@ func TestDublinScheduleTracksDaylightSavingTime(t *testing.T) {
 	scheduler := New(nil, nil, "CRON_TZ=Europe/Dublin 0 6 * * *")
 	defer scheduler.cancel()
 
-	entryID, err := scheduler.cron.AddFunc(scheduler.Settings().Settings.Cron, func() {})
+	entryID, err := scheduler.cron.AddFunc(scheduler.Settings("").Settings.Cron, func() {})
 	if err != nil {
 		t.Fatalf("parse Dublin schedule: %v", err)
 	}

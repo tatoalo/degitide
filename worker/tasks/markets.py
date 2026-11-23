@@ -16,6 +16,7 @@ from urllib.parse import parse_qs, urlencode, urlsplit
 import exchange_calendars as xcals
 import pandas as pd
 
+from . import tradegate
 from .products import _product_info_url
 
 log = logging.getLogger("degitide-worker.markets")
@@ -84,6 +85,8 @@ async def resolve_exchanges(context, captured):
 def _sessions(mic, day):
     start = day - timedelta(days=14)
     end = day + timedelta(days=30)
+    if mic == "XGAT":
+        return tradegate.sessions(day, start, end)
     calendar = xcals.get_calendar(mic, start=start, end=end)
     sessions = []
     for _, row in calendar.schedule.loc[str(start):str(end)].iterrows():
@@ -96,6 +99,7 @@ def _sessions(mic, day):
 
 def build_schedule(holdings, products, exchanges, now=None):
     now = now or datetime.now(timezone.utc)
+    valid_until = now + timedelta(days=28)
     markets, unknown = {}, 0
     for holding in holdings:
         product = products.get(holding["product_id"], {})
@@ -109,9 +113,14 @@ def build_schedule(holdings, products, exchanges, now=None):
         try:
             if not supported_type or not MIC.fullmatch(mic):
                 raise ValueError("unsupported listing")
-            zone, sessions = _sessions(mic, now.date())
+            day = now.astimezone(tradegate.BERLIN).date() if mic == "XGAT" else now.date()
+            zone, sessions = _sessions(mic, day)
             if not sessions:
                 raise ValueError("no calendar coverage")
+            if mic == "XGAT":
+                valid_until = min(valid_until, tradegate.VALID_UNTIL)
+                if holding["exchange_name"] == mic:
+                    holding["exchange_name"] = "Tradegate BSX"
             markets[mic] = {"mic": mic, "name": holding["exchange_name"], "timezone": zone, "sessions": sessions}
         except (ValueError, KeyError, xcals.errors.InvalidCalendarName, xcals.errors.DateOutOfBounds):
             unknown += 1
@@ -121,7 +130,7 @@ def build_schedule(holdings, products, exchanges, now=None):
             unknown += 1
     return {
         "generated_at": now.isoformat(),
-        "valid_until": (now + timedelta(days=28)).isoformat(),
+        "valid_until": valid_until.isoformat(),
         "holding_count": len(holdings), "unknown_holdings": unknown,
         "markets": [markets[key] for key in sorted(markets)],
     }
