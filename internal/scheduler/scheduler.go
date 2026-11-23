@@ -12,9 +12,9 @@ import (
 	"time"
 	_ "time/tzdata"
 
+	"github.com/robfig/cron/v3"
 	"github.com/tatoalo/degitide/internal/browser"
 	"github.com/tatoalo/degitide/internal/db"
-	"github.com/robfig/cron/v3"
 	"gorm.io/gorm"
 )
 

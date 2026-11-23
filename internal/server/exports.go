@@ -13,8 +13,8 @@ import (
 	"time"
 	"unicode"
 
-	"github.com/tatoalo/degitide/internal/db"
 	"github.com/signintech/gopdf"
+	"github.com/tatoalo/degitide/internal/db"
 	"golang.org/x/image/font/gofont/gobold"
 	"golang.org/x/image/font/gofont/goregular"
 )

@@ -7,9 +7,9 @@ import (
 	"strings"
 	"time"
 
+	"github.com/robfig/cron/v3"
 	"github.com/tatoalo/degitide/internal/db"
 	"github.com/tatoalo/degitide/internal/market"
-	"github.com/robfig/cron/v3"
 )
 
 type MarketStatus struct {
