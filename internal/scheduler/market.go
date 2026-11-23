@@ -100,7 +100,7 @@ func (s *Scheduler) ScheduleStatus(account db.Account, now time.Time) ScheduleSt
 }
 
 func (s *Scheduler) scheduleStatusLocked(account db.Account, now time.Time) ScheduleStatus {
-	settings := s.settings
+	settings := s.settingsLocked(account.ID).Settings
 	interval := time.Duration(settings.IntervalMinutes) * time.Minute
 	status := ScheduleStatus{Mode: settings.Mode, IntervalMinutes: settings.IntervalMinutes, CloseDelayMinutes: settings.CloseDelayMinutes, Markets: []MarketStatus{}, ServerTimezone: serverTimezone()}
 	if settings.Mode == "manual" {
@@ -119,7 +119,14 @@ func (s *Scheduler) scheduleStatusLocked(account db.Account, now time.Time) Sche
 			if location == time.Local {
 				status.Timezone = "Server time"
 			}
-			for next, i := parsed.Next(now), 0; !next.IsZero() && i < 3; next, i = parsed.Next(next), i+1 {
+			next := parsed.Next(now)
+			// An active @every timer is anchored to its start, not to the status request.
+			if _, relative := parsed.(cron.ConstantDelaySchedule); relative && s.started {
+				if scheduled := s.cron.Entry(s.entries[settings.Cron]).Next; scheduled.After(now) {
+					next = scheduled
+				}
+			}
+			for i := 0; !next.IsZero() && i < 3; next, i = parsed.Next(next), i+1 {
 				status.UpcomingRuns = append(status.UpcomingRuns, next.In(location))
 			}
 			if len(status.UpcomingRuns) > 0 {
@@ -192,9 +199,6 @@ func (s *Scheduler) triggerDue() {
 }
 
 func (s *Scheduler) triggerDueLocked() {
-	if s.settings.Mode != "market" {
-		return
-	}
 	if s.IsRunning() {
 		return
 	}
@@ -206,6 +210,9 @@ func (s *Scheduler) triggerDueLocked() {
 	now := time.Now()
 	var ids []string
 	for _, account := range accounts {
+		if s.settingsLocked(account.ID).Settings.Mode != "market" {
+			continue
+		}
 		status := s.scheduleStatusLocked(account, now)
 		if status.NextSync != nil && !status.NextSync.After(now) {
 			ids = append(ids, account.ID)

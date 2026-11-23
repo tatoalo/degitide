@@ -5,21 +5,38 @@ import (
 	"errors"
 	"io"
 	"net/http"
+	"net/url"
 
 	"github.com/tatoalo/degitide/internal/scheduler"
 )
 
 func (s *Server) handleSchedule(w http.ResponseWriter, r *http.Request) {
 	planner, ok := s.scheduler.(interface {
-		Settings() scheduler.SettingsView
-		SaveSettings(scheduler.Settings) error
-		ResetSettings() error
+		Settings(string) scheduler.SettingsView
+		SaveSettings(string, scheduler.Settings) error
+		ResetSettings(string) error
 	})
 	if !ok {
 		writeError(w, http.StatusServiceUnavailable, errors.New("sync settings unavailable"))
 		return
 	}
-	var err error
+	query, err := url.ParseQuery(r.URL.RawQuery)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, errors.New("invalid schedule query"))
+		return
+	}
+	accountID := ""
+	if values, scoped := query["account"]; scoped {
+		if len(values) != 1 || values[0] == "" {
+			writeError(w, http.StatusBadRequest, errors.New("expected one account ID"))
+			return
+		}
+		account, ok := s.requestAccount(w, r)
+		if !ok {
+			return
+		}
+		accountID = account.ID
+	}
 	switch r.Method {
 	case http.MethodPut:
 		var settings scheduler.Settings
@@ -33,9 +50,9 @@ func (s *Server) handleSchedule(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusBadRequest, errors.New("expected one settings object"))
 			return
 		}
-		err = planner.SaveSettings(settings)
+		err = planner.SaveSettings(accountID, settings)
 	case http.MethodDelete:
-		err = planner.ResetSettings()
+		err = planner.ResetSettings(accountID)
 	}
 	if err != nil {
 		code := http.StatusInternalServerError
@@ -47,5 +64,5 @@ func (s *Server) handleSchedule(w http.ResponseWriter, r *http.Request) {
 		writeError(w, code, err)
 		return
 	}
-	writeJSON(w, planner.Settings())
+	writeJSON(w, planner.Settings(accountID))
 }

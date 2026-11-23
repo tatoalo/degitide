@@ -5,15 +5,17 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"slices"
+	"strings"
 	"time"
 
 	"github.com/robfig/cron/v3"
+	"github.com/tatoalo/degitide/internal/db"
 )
 
 const settingsKey = "sync_settings:v1"
 
-// Settings are workspace-wide. Each account still has its own calendar,
-// last successful sync and persistent failure backoff.
+// Accounts inherit the workspace settings until they have a saved override.
 type Settings struct {
 	Mode              string `json:"mode"`
 	IntervalMinutes   int    `json:"interval_minutes"`
@@ -68,108 +70,188 @@ func (s *Scheduler) ConfigureMarket(interval time.Duration, maintenance string) 
 	if err := defaults.Validate(); err != nil {
 		return err
 	}
-	settings, saved := defaults, false
+	overrides := make(map[string]Settings)
 	if s.database != nil {
-		raw, err := s.database.GetMeta(settingsKey)
-		if err != nil {
+		var rows []db.Meta
+		if err := s.database.Where("key = ? OR key GLOB ?", settingsKey, settingsKey+":*").Find(&rows).Error; err != nil {
 			return err
 		}
-		if raw != "" {
-			if err := json.Unmarshal([]byte(raw), &settings); err != nil {
+		for _, row := range rows {
+			if row.Value == "" {
+				continue
+			}
+			_, accountID, _ := strings.Cut(row.Key, settingsKey+":")
+			settings := defaults
+			if err := json.Unmarshal([]byte(row.Value), &settings); err != nil {
 				return fmt.Errorf("read saved sync settings: %w", err)
 			}
 			if err := settings.Validate(); err != nil {
 				return err
 			}
-			saved = true
+			overrides[accountID] = settings
 		}
 	}
-	s.defaults, s.settings, s.savedSettings = defaults, settings, saved
+	s.defaults, s.overrides = defaults, overrides
 	return nil
 }
 
-func (s *Scheduler) Settings() SettingsView {
-	s.settingsMu.RLock()
-	defer s.settingsMu.RUnlock()
-	source := "environment"
-	if s.savedSettings {
-		source = "dashboard"
+func (s *Scheduler) settingsLocked(accountID string) SettingsView {
+	view := SettingsView{Settings: s.defaults, Defaults: s.defaults, Source: "environment"}
+	if workspace, ok := s.overrides[""]; ok {
+		view.Settings, view.Source = workspace, "dashboard"
 	}
-	return SettingsView{Settings: s.settings, Defaults: s.defaults, Source: source}
+	if accountID != "" {
+		view.Defaults, view.Source = view.Settings, "workspace"
+		if account, ok := s.overrides[accountID]; ok {
+			view.Settings, view.Source = account, "account"
+		}
+	}
+	return view
 }
 
-func (s *Scheduler) SaveSettings(settings Settings) error {
+func (s *Scheduler) Settings(accountID string) SettingsView {
+	s.settingsMu.RLock()
+	defer s.settingsMu.RUnlock()
+	return s.settingsLocked(accountID)
+}
+
+func (s *Scheduler) SaveSettings(accountID string, settings Settings) error {
 	if err := settings.Validate(); err != nil {
 		return err
 	}
-	s.settingsMu.Lock()
-	defer s.settingsMu.Unlock()
-	return s.applySettingsLocked(settings, true)
+	return s.applySettings(accountID, &settings)
 }
 
-func (s *Scheduler) ResetSettings() error {
-	s.settingsMu.Lock()
-	defer s.settingsMu.Unlock()
-	return s.applySettingsLocked(s.defaults, false)
+func (s *Scheduler) ResetSettings(accountID string) error {
+	return s.applySettings(accountID, nil)
 }
 
-func (s *Scheduler) applySettingsLocked(settings Settings, saved bool) error {
+func (s *Scheduler) applySettings(accountID string, settings *Settings) error {
+	s.settingsMu.Lock()
+	defer s.settingsMu.Unlock()
 	s.stateMu.Lock()
 	defer s.stateMu.Unlock()
 	if s.stopped {
 		return ErrSchedulerStopped
 	}
-	raw := ""
-	if saved {
+	key := settingsKey
+	if accountID != "" {
+		key += ":" + accountID
+	}
+	if settings == nil {
+		if err := s.database.Delete(&db.Meta{}, "key = ?", key).Error; err != nil {
+			return err
+		}
+		delete(s.overrides, accountID)
+	} else {
 		value, err := json.Marshal(settings)
 		if err != nil {
 			return err
 		}
-		raw = string(value)
+		if err := s.database.SetMeta(key, string(value)); err != nil {
+			return err
+		}
+		s.overrides[accountID] = *settings
 	}
-	// Persist first: a failed write leaves the running plan unchanged.
-	if err := s.database.SetMeta(settingsKey, raw); err != nil {
-		return err
-	}
-	s.settings, s.savedSettings = settings, saved
 	if s.started {
 		s.installScheduleLocked()
 	}
 	return nil
 }
 
-// Every callback checks its generation under the settings lock. Jobs already
-// queued by the old cron cannot begin a pull after a new plan has been saved.
-// An in-flight pull may finish; saving settings never starts a worker request.
+// Market accounts share a minute tick. Custom jobs share a timer only when
+// their cron expressions match. Keep unchanged timers (including @every) in phase.
 func (s *Scheduler) installScheduleLocked() {
-	if s.entry != 0 {
-		s.cron.Remove(s.entry)
-		s.entry = 0
+	rules := make(map[string]string)
+	add := func(settings Settings) {
+		switch settings.Mode {
+		case "market":
+			rules["market"] = "* * * * *"
+		case "cron":
+			rules[settings.Cron] = settings.Cron
+		}
 	}
-	s.generation++
-	generation := s.generation
-	if s.settings.Mode == "manual" {
+	add(s.settingsLocked("").Settings)
+	for accountID, settings := range s.overrides {
+		if accountID != "" {
+			add(settings)
+		}
+	}
+	for rule, entry := range s.entries {
+		if _, keep := rules[rule]; !keep {
+			s.cron.Remove(entry)
+			delete(s.entries, rule)
+		}
+	}
+	for id, spec := range s.pendingCron {
+		settings := s.settingsLocked(id).Settings
+		if settings.Mode != "cron" || settings.Cron != spec {
+			delete(s.pendingCron, id)
+		}
+	}
+	for rule, spec := range rules {
+		if _, exists := s.entries[rule]; exists {
+			continue
+		}
+		var entry cron.EntryID
+		var err error
+		entry, err = s.cron.AddFunc(spec, func() {
+			s.settingsMu.Lock()
+			defer s.settingsMu.Unlock()
+			if s.entries[rule] != entry {
+				return
+			}
+			s.runRuleLocked(rule)
+		})
+		if err != nil {
+			log.Printf("scheduler: invalid schedule: %v", err)
+			continue
+		}
+		s.entries[rule] = entry
+	}
+}
+
+func (s *Scheduler) runRuleLocked(rule string) {
+	if rule == "market" {
+		s.triggerDueLocked()
 		return
 	}
-	spec := "* * * * *"
-	if s.settings.Mode == "cron" {
-		spec = s.settings.Cron
-	}
-	parsed, err := cron.ParseStandard(spec)
+	accounts, err := s.database.Accounts()
 	if err != nil {
-		log.Printf("scheduler: invalid schedule: %v", err)
+		log.Printf("scheduler: list accounts: %v", err)
 		return
 	}
-	s.entry = s.cron.Schedule(parsed, cron.FuncJob(func() {
-		s.settingsMu.RLock()
-		defer s.settingsMu.RUnlock()
-		if s.generation != generation {
-			return
+	for _, account := range accounts {
+		settings := s.settingsLocked(account.ID).Settings
+		if settings.Mode == "cron" && settings.Cron == rule {
+			s.pendingCron[account.ID] = rule
 		}
-		if s.settings.Mode == "market" {
-			s.triggerDueLocked()
-		} else if err := s.triggerAccounts(nil, true); err != nil {
-			log.Printf("scheduler: %v", err)
+	}
+	if progress := s.Progress(); progress.Running {
+		for _, active := range progress.Accounts {
+			delete(s.pendingCron, active.ID)
 		}
-	}))
+	}
+	s.startPendingCronLocked()
+}
+
+// A second timer may fire while the worker is syncing another account.
+// Coalesce repeated ticks for each account and drain them when the worker is free.
+func (s *Scheduler) startPendingCronLocked() {
+	if len(s.pendingCron) == 0 || s.IsRunning() {
+		return
+	}
+	ids := make([]string, 0, len(s.pendingCron))
+	for id := range s.pendingCron {
+		ids = append(ids, id)
+	}
+	slices.Sort(ids)
+	err := s.triggerAccounts(ids, true)
+	if errors.Is(err, ErrPullInProgress) {
+		return
+	}
+	if err != nil && !errors.Is(err, ErrSchedulerStopped) {
+		log.Printf("scheduler: start scheduled accounts: %v", err)
+	}
+	clear(s.pendingCron)
 }
